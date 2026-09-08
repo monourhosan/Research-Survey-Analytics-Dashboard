@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Dashboard - Research Survey Analytics Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">R</div>
+        <div>
+          <div class="brand-title">Research Survey</div>
+          <div class="brand-subtitle">Analytics Dashboard</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="dashboard.html" class="nav-link">
+          <span>📊</span> Overview Dashboard
+        </a>
+        <a href="surveys.html" class="nav-link">
+          <span>📋</span> All Surveys
+        </a>
+        <a href="create-survey.html" class="nav-link">
+          <span>➕</span> Create Survey
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div class="user-avatar" id="nav-user-avatar">A</div>
+          <div class="user-meta">
+            <div class="user-name" id="nav-user-name">Research Admin</div>
+            <div class="user-email" id="nav-user-email">admin@research.local</div>
+          </div>
+        </div>
+        <button type="button" class="btn-logout" id="btn-global-logout">
+          <span>🚪</span> Sign Out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Wrapper -->
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
+          <div class="header-title-section">
+            <h1>Research Overview</h1>
+            <p>System summary metrics and recent survey response activity</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <a href="create-survey.html" class="btn btn-primary btn-sm">
+            <span>➕</span> New Survey
+          </a>
+        </div>
+      </header>
+
+      <main class="content-area">
+        <!-- Metric Cards -->
+        <section class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Total Surveys</div>
+            <div class="metric-value" id="stat-total-surveys">0</div>
+            <div class="metric-meta">Across all research projects</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Active Surveys</div>
+            <div class="metric-value" id="stat-active-surveys" style="color: var(--color-secondary);">0</div>
+            <div class="metric-meta">Currently accepting responses</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Closed Surveys</div>
+            <div class="metric-value" id="stat-closed-surveys">0</div>
+            <div class="metric-meta">Archived historical studies</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Total Responses</div>
+            <div class="metric-value" id="stat-total-responses" style="color: var(--color-primary);">0</div>
+            <div class="metric-meta">Total respondent submissions</div>
+          </div>
+        </section>
+
+        <!-- Recent Surveys Card -->
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Recent Surveys</h2>
+              <p class="card-subtitle">Latest research survey campaigns and submission counts</p>
+            </div>
+            <a href="surveys.html" class="btn btn-secondary btn-sm">View All Surveys →</a>
+          </div>
+
+          <div class="card-body" style="padding: 0;">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Survey Title</th>
+                    <th>Status</th>
+                    <th>Responses</th>
+                    <th>Created Date</th>
+                    <th style="text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="recent-surveys-tbody">
+                  <tr>
+                    <td colspan="5" class="empty-state">
+                      <div class="empty-state-icon">⏳</div>
+                      <div class="empty-state-title">Loading surveys...</div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="js/common.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

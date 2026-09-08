@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Research Survey</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="public-page-body">
+  <div class="survey-public-card" id="survey-card">
+    <!-- Header -->
+    <header class="survey-public-header">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+        <span style="background: rgba(242, 238, 223, 0.2); color: var(--palette-cream); padding: 3px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
+          Research Questionnaire
+        </span>
+      </div>
+      <h1 id="survey-title">Loading survey...</h1>
+      <p id="survey-desc"></p>
+    </header>
+
+    <!-- Body -->
+    <div class="survey-public-body" id="survey-form-container">
+      <div class="empty-state">
+        <div class="empty-state-icon">⏳</div>
+        <div class="empty-state-title">Loading questions...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="js/common.js"></script>
+  <script src="js/survey.js"></script>
+</body>
+</html>

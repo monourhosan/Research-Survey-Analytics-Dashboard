@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>All Surveys - Research Survey Analytics Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">R</div>
+        <div>
+          <div class="brand-title">Research Survey</div>
+          <div class="brand-subtitle">Analytics Dashboard</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="dashboard.html" class="nav-link">
+          <span>📊</span> Overview Dashboard
+        </a>
+        <a href="surveys.html" class="nav-link">
+          <span>📋</span> All Surveys
+        </a>
+        <a href="create-survey.html" class="nav-link">
+          <span>➕</span> Create Survey
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div class="user-avatar" id="nav-user-avatar">A</div>
+          <div class="user-meta">
+            <div class="user-name" id="nav-user-name">Research Admin</div>
+            <div class="user-email" id="nav-user-email">admin@research.local</div>
+          </div>
+        </div>
+        <button type="button" class="btn-logout" id="btn-global-logout">
+          <span>🚪</span> Sign Out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
+          <div class="header-title-section">
+            <h1>Research Surveys</h1>
+            <p>Manage surveys, share public links, and inspect analytics</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <a href="create-survey.html" class="btn btn-primary btn-sm">
+            <span>➕</span> Create Survey
+          </a>
+        </div>
+      </header>
+
+      <main class="content-area">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Survey Inventory</h2>
+              <p class="card-subtitle">Complete list of research surveys in SQLite database</p>
+            </div>
+          </div>
+
+          <div class="card-body" style="padding: 0;">
+            <div class="survey-list-toolbar" aria-label="Survey list filters">
+              <label class="survey-filter-field survey-search-field" for="survey-search">
+                <span>Search surveys</span>
+                <input
+                  type="search"
+                  id="survey-search"
+                  class="form-input"
+                  placeholder="Search title or description..."
+                  autocomplete="off"
+                >
+              </label>
+              <label class="survey-filter-field" for="survey-status-filter">
+                <span>Status</span>
+                <select id="survey-status-filter" class="form-select">
+                  <option value="all">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="active">Active</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </label>
+              <div id="survey-filter-count" class="survey-filter-count" role="status" aria-live="polite"></div>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Title & Description</th>
+                    <th>Status</th>
+                    <th>Responses</th>
+                    <th>Created</th>
+                    <th style="text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="surveys-tbody">
+                  <tr>
+                    <td colspan="5" class="empty-state">
+                      <div class="empty-state-icon">⏳</div>
+                      <div class="empty-state-title">Loading surveys...</div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="js/common.js"></script>
+  <script src="js/surveys.js"></script>
+</body>
+</html>

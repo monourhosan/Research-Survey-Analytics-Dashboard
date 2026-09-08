@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Create Survey - Research Survey Analytics Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">R</div>
+        <div>
+          <div class="brand-title">Research Survey</div>
+          <div class="brand-subtitle">Analytics Dashboard</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="dashboard.html" class="nav-link">
+          <span>📊</span> Overview Dashboard
+        </a>
+        <a href="surveys.html" class="nav-link">
+          <span>📋</span> All Surveys
+        </a>
+        <a href="create-survey.html" class="nav-link active">
+          <span>➕</span> Create Survey
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div class="user-avatar" id="nav-user-avatar">A</div>
+          <div class="user-meta">
+            <div class="user-name" id="nav-user-name">Research Admin</div>
+            <div class="user-email" id="nav-user-email">admin@research.local</div>
+          </div>
+        </div>
+        <button type="button" class="btn-logout" id="btn-global-logout">
+          <span>🚪</span> Sign Out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
+          <div class="header-title-section">
+            <h1 id="page-heading">Create Research Survey</h1>
+            <p>Define survey questions and publish for public response collection</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button type="button" id="btn-save-draft" class="btn btn-secondary btn-sm">
+            Save Draft
+          </button>
+          <button type="button" id="btn-publish-survey" class="btn btn-primary btn-sm">
+            Publish Survey
+          </button>
+        </div>
+      </header>
+
+      <main class="content-area" style="max-width: 900px;">
+        <form id="survey-builder-form">
+          <!-- Survey Metadata Card -->
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Survey Details</h2>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label for="survey-title" class="form-label">
+                  Survey Title <span class="required-star">*</span>
+                </label>
+                <input 
+                  type="text" 
+                  id="survey-title" 
+                  class="form-input" 
+                  placeholder="e.g., Student Academic Experience Survey 2026" 
+                  required 
+                  maxlength="255"
+                >
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="survey-description" class="form-label">Description / Researcher Note</label>
+                <textarea 
+                  id="survey-description" 
+                  class="form-textarea" 
+                  rows="3" 
+                  placeholder="Briefly state the research objective and context for respondents..."
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Question Set Section -->
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <div>
+              <h2 style="font-size: 18px; font-weight: 700; color: var(--color-text);">Survey Questions</h2>
+              <p style="font-size: 13px; color: var(--color-text-muted);">
+                Supported types: Short Text, Multiple Choice (2–6 options), Rating 1–5, Yes/No
+              </p>
+            </div>
+            <button type="button" id="btn-add-question" class="btn btn-teal btn-sm">
+              <span>➕</span> Add Question
+            </button>
+          </div>
+
+          <div id="questions-container">
+            <!-- Questions rendered dynamically -->
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+            <a href="surveys.html" class="btn btn-secondary">Cancel</a>
+            <button type="button" id="btn-save-draft-bottom" class="btn btn-secondary">Save Draft</button>
+            <button type="button" id="btn-publish-survey-bottom" class="btn btn-primary">Publish Survey</button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="js/common.js"></script>
+  <script src="js/create-survey.js"></script>
+</body>
+</html>

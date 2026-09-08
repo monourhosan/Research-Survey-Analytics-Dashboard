@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Survey Analytics - Research Survey Analytics Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">R</div>
+        <div>
+          <div class="brand-title">Research Survey</div>
+          <div class="brand-subtitle">Analytics Dashboard</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="dashboard.html" class="nav-link">
+          <span>📊</span> Overview Dashboard
+        </a>
+        <a href="surveys.html" class="nav-link">
+          <span>📋</span> All Surveys
+        </a>
+        <a href="create-survey.html" class="nav-link">
+          <span>➕</span> Create Survey
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div class="user-avatar" id="nav-user-avatar">A</div>
+          <div class="user-meta">
+            <div class="user-name" id="nav-user-name">Research Admin</div>
+            <div class="user-email" id="nav-user-email">admin@research.local</div>
+          </div>
+        </div>
+        <button type="button" class="btn-logout" id="btn-global-logout">
+          <span>🚪</span> Sign Out
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
+          <div class="header-title-section">
+            <h1 id="survey-title-display">Survey Analytics</h1>
+            <p id="survey-meta-display">Loading survey metrics and distribution analysis...</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button type="button" id="btn-copy-public-url" class="btn btn-secondary btn-sm" title="Copy public link">
+            <span>🔗</span> Copy Public Link
+          </button>
+          <button type="button" id="btn-export-csv" class="btn btn-teal btn-sm" title="Download CSV">
+            Export Responses as CSV
+          </button>
+        </div>
+      </header>
+
+      <main class="content-area">
+        <section class="analytics-toolbar card no-print" aria-labelledby="analytics-filter-title">
+          <div class="analytics-toolbar-copy">
+            <h2 id="analytics-filter-title">Research Date Filter</h2>
+            <p>Focus every metric, chart, insight, and CSV export on a selected response period.</p>
+            <div id="analytics-filter-status" class="filter-status" role="status" aria-live="polite">
+              Showing all recorded responses
+            </div>
+          </div>
+
+          <form id="analytics-filter-form" class="analytics-filter-form">
+            <label class="filter-field" for="analytics-date-from">
+              <span>From</span>
+              <input type="date" id="analytics-date-from" class="form-input" autocomplete="off">
+            </label>
+            <label class="filter-field" for="analytics-date-to">
+              <span>To</span>
+              <input type="date" id="analytics-date-to" class="form-input" autocomplete="off">
+            </label>
+            <div class="filter-actions">
+              <button type="submit" id="btn-apply-filter" class="btn btn-primary btn-sm">Apply Filter</button>
+              <button type="button" id="btn-clear-filter" class="btn btn-secondary btn-sm">Clear</button>
+              <button type="button" id="btn-print-report" class="btn btn-secondary btn-sm" title="Open the browser print dialog">
+                <span>🖨</span> Print / Save PDF
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <div class="print-report-header" aria-hidden="true">
+          <strong>Research Survey Analytics Dashboard</strong>
+          <span id="print-report-context">All recorded responses</span>
+        </div>
+
+        <!-- Overview Cards -->
+        <section class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Total Responses</div>
+            <div class="metric-value" id="metric-total-responses" style="color: var(--color-primary);">0</div>
+            <div class="metric-meta" id="metric-total-meta">Completed submissions</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Average Rating</div>
+            <div class="metric-value" id="metric-avg-rating" style="color: var(--color-secondary);">N/A</div>
+            <div class="metric-meta" id="metric-rating-meta">Overall satisfaction score</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Latest Response</div>
+            <div class="metric-value" id="metric-latest-date" style="font-size: 20px; padding-top: 6px;">None</div>
+            <div class="metric-meta">Most recent timestamp</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">7-Day Response Growth</div>
+            <div class="metric-value" id="metric-growth-trend">0%</div>
+            <div class="metric-meta" id="metric-growth-meta">vs. previous 7-day period</div>
+          </div>
+        </section>
+
+        <!-- Automated Insight Engine Banner (Signature Feature) -->
+        <section class="insights-banner" id="insights-section" style="display: none;">
+          <div class="insights-header">
+            <div class="insights-title">
+              <span>💡</span> Automated Research Insights
+            </div>
+            <div class="insights-disclaimer">
+              Rule-based automated summary generated from survey responses
+            </div>
+          </div>
+          <ul class="insights-list" id="insights-list">
+            <!-- Populated dynamically -->
+          </ul>
+        </section>
+
+        <!-- Question-by-Question Analysis -->
+        <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <h2 style="font-size: 19px; font-weight: 700; color: var(--color-text);">Question Analysis & Visualizations</h2>
+            <p style="font-size: 13px; color: var(--color-text-muted);">
+              Distribution charts rendered with native HTML5 Canvas and Vanilla JavaScript
+            </p>
+          </div>
+        </div>
+
+        <div id="questions-analysis-container">
+          <!-- Question analysis cards with canvas charts injected here -->
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="js/common.js"></script>
+  <script src="js/analytics.js"></script>
+</body>
+</html>

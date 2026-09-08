@@ -259,6 +259,15 @@ async function runTests() {
     }
     assert(allPagesOk, 'TEST 19: All 6 main HTML pages load with HTTP 200');
 
+    // TEST 20: Critical frontend assets exist (prevents unstyled pages and broken form handlers)
+    const assets = ['/css/styles.css', '/js/common.js', '/js/login.js'];
+    let allAssetsOk = true;
+    for (const asset of assets) {
+      const assetRes = await request('GET', asset);
+      if (assetRes.status !== 200 || assetRes.raw.length === 0) allAssetsOk = false;
+    }
+    assert(allAssetsOk, 'TEST 20: Critical CSS and JavaScript assets load with HTTP 200');
+
     console.log('==============================================');
     console.log(`TEST SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
     console.log('==============================================');

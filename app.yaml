@@ -1,0 +1,14 @@
+# Wasmer Edge Application Configuration
+# Defines how the Research Survey Analytics Dashboard runs on Wasmer Edge
+kind: wasmer.io/App.v0
+name: research-survey-dashboard
+package: .
+
+env:
+  NODE_ENV: "production"
+  PORT: "80"
+  HOST: "0.0.0.0"
+  WASMER: "1"
+
+scaling:
+  mode: single_concurrency

@@ -1,0 +1,25 @@
+{
+  "name": "research-survey-dashboard",
+  "version": "1.0.0",
+  "description": "Research Survey Analytics Dashboard - CSE499 Internship Project",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js"
+  },
+  "keywords": [
+    "survey",
+    "analytics",
+    "dashboard",
+    "sqlite",
+    "express",
+    "research"
+  ],
+  "author": "CSE499 Undergraduate Intern",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "sql.js": "^1.12.0"
+  }
+}

@@ -1,0 +1,6 @@
+node_modules
+.DS_Store
+*.log
+/Research Survey Analytics Dashboard
+/research-survey-dashboard
+/STUDENT_CODE_REPORT.md

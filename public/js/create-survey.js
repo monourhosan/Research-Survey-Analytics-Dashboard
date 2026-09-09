@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (editingSurveyId) {
     document.getElementById('page-heading').textContent = 'Manage Research Survey';
     await loadExistingSurvey(editingSurveyId);
+    await loadSurveyReadiness();
   } else {
     // Add default initial question for convenient authoring
     addQuestion('rating', 'Overall, how satisfied are you with our service?', true);
@@ -32,6 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Bind top & bottom buttons
   document.getElementById('btn-add-question').addEventListener('click', () => addQuestion());
   document.getElementById('btn-preview-survey').addEventListener('click', openSurveyPreview);
+  document.getElementById('btn-use-template').addEventListener('click', openTemplatePicker);
   document.getElementById('btn-preview-survey-bottom').addEventListener('click', openSurveyPreview);
   document.getElementById('btn-save-draft').addEventListener('click', () => submitSurvey('draft'));
   document.getElementById('btn-save-draft-bottom').addEventListener('click', () => submitSurvey('draft'));
@@ -46,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     scheduleLocalDraftSave();
   });
   document.getElementById('response-limit').addEventListener('input', scheduleLocalDraftSave);
+  document.getElementById('target-responses').addEventListener('input', scheduleLocalDraftSave);
   document.getElementById('one-response-per-browser').addEventListener('change', scheduleLocalDraftSave);
   document.getElementById('btn-restore-local-draft').addEventListener('click', restorePendingLocalDraft);
   document.getElementById('btn-discard-local-draft').addEventListener('click', discardPendingLocalDraft);
@@ -59,6 +62,51 @@ window.addEventListener('beforeunload', event => {
   event.preventDefault();
   event.returnValue = '';
 });
+
+async function loadSurveyReadiness() {
+  if (!editingSurveyId) return;
+  const card = document.getElementById('survey-readiness-card');
+  try {
+    const response = await fetch(`/api/surveys/${editingSurveyId}/readiness`);
+    const readiness = await response.json();
+    if (!response.ok) throw new Error(readiness.error || 'Readiness unavailable');
+    card.hidden = false;
+    document.getElementById('survey-readiness-title').textContent = `Survey readiness — ${readiness.percentage}%`;
+    document.getElementById('survey-readiness-summary').textContent = readiness.ready ? 'Ready to publish.' : `${readiness.blocking.length} blocking item${readiness.blocking.length === 1 ? '' : 's'} to complete.`;
+    const list = document.getElementById('survey-readiness-list');
+    list.replaceChildren(...readiness.checks.filter(item => !item.passed).slice(0, 5).map(item => {
+      const row = document.createElement('li'); row.textContent = `${item.blocking ? 'Required' : 'Recommended'}: ${item.label}${item.detail ? ` — ${item.detail}` : ''}`; return row;
+    }));
+    if (!list.children.length) list.innerHTML = '<li>All configuration checks have passed.</li>';
+  } catch (err) { console.warn('Readiness check unavailable:', err); }
+}
+
+async function openTemplatePicker() {
+  try {
+    const response = await fetch('/api/templates');
+    const templates = await response.json();
+    if (!response.ok) throw new Error(templates.error || 'Unable to load templates');
+    if (!templates.length) { showToast('No saved templates yet. Save an existing study as a template from the workspace.', 'info'); return; }
+    const dialog = document.createElement('dialog');
+    dialog.className = 'workspace-dialog';
+    dialog.innerHTML = `<div class="workspace-dialog-inner"><button type="button" class="share-dialog-close" aria-label="Close templates">×</button><h2>My Templates</h2><p>Start a new editable Draft survey from a saved questionnaire structure.</p><div class="notes-list" id="template-picker-list"></div></div>`;
+    const list = dialog.querySelector('#template-picker-list');
+    templates.forEach(template => {
+      const row = document.createElement('article'); row.className = 'note-item';
+      row.innerHTML = `<p><strong>${escapeHtml(template.name)}</strong></p><small>${escapeHtml(template.description || 'Reusable survey structure')}</small><div class="modal-actions"><button type="button" class="btn btn-primary btn-sm">Use template</button></div>`;
+      row.querySelector('button').addEventListener('click', async () => {
+        const create = await fetch(`/api/templates/${template.id}/create-survey`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: `New ${template.name}` }) });
+        const data = await create.json();
+        if (!create.ok) { showToast(data.error || 'Unable to create survey from template.', 'error'); return; }
+        window.location.href = `create-survey.html?edit=${data.id}`;
+      });
+      list.appendChild(row);
+    });
+    dialog.querySelector('.share-dialog-close').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    document.body.appendChild(dialog); dialog.showModal();
+  } catch (err) { showToast(err.message || 'Unable to load templates.', 'error'); }
+}
 
 function getLocalDraftKey() {
   return editingSurveyId
@@ -94,6 +142,7 @@ function getCurrentDraftContent() {
     response_deadline: document.getElementById('response-deadline').value,
     response_limit_enabled: document.getElementById('response-limit-enabled').checked,
     response_limit: document.getElementById('response-limit').value,
+    target_responses: document.getElementById('target-responses').value,
     one_response_per_browser: document.getElementById('one-response-per-browser').checked,
     questions: cloneDraftQuestions(questionsList)
   };
@@ -106,6 +155,7 @@ function getDraftFingerprint(content) {
     response_deadline: content.response_deadline || '',
     response_limit_enabled: Boolean(content.response_limit_enabled),
     response_limit: content.response_limit || '',
+    target_responses: content.target_responses || '',
     one_response_per_browser: Boolean(content.one_response_per_browser),
     questions: content.questions.map(question => ({
       question_text: question.question_text,
@@ -193,6 +243,7 @@ function restorePendingLocalDraft() {
   document.getElementById('response-deadline').value = content.response_deadline || '';
   document.getElementById('response-limit-enabled').checked = Boolean(content.response_limit_enabled);
   document.getElementById('response-limit').value = content.response_limit || '';
+  document.getElementById('target-responses').value = content.target_responses || '';
   document.getElementById('one-response-per-browser').checked = Boolean(content.one_response_per_browser);
   syncResponseLimitFields();
   questionsList = cloneDraftQuestions(content.questions);
@@ -224,6 +275,7 @@ async function loadExistingSurvey(id) {
     document.getElementById('response-deadline').value = toDateTimeLocalValue(data.response_deadline);
     document.getElementById('response-limit-enabled').checked = Number.isSafeInteger(data.response_limit) && data.response_limit > 0;
     document.getElementById('response-limit').value = data.response_limit || '';
+    document.getElementById('target-responses').value = data.target_responses || '';
     document.getElementById('one-response-per-browser').checked = data.one_response_per_browser === 1 || data.one_response_per_browser === true;
     syncResponseLimitFields();
 
@@ -691,11 +743,13 @@ async function submitSurvey(targetStatus) {
   const responseLimitEnabled = document.getElementById('response-limit-enabled');
   const responseLimitInput = document.getElementById('response-limit');
   const oneResponsePerBrowser = document.getElementById('one-response-per-browser');
+  const targetResponsesInput = document.getElementById('target-responses');
 
   const title = titleInput.value.trim();
   const description = descInput.value.trim();
   let responseDeadline = null;
   let responseLimit = null;
+  let targetResponses = null;
 
   if (deadlineInput.value) {
     const parsedDeadline = new Date(deadlineInput.value);
@@ -721,6 +775,21 @@ async function submitSurvey(targetStatus) {
       return;
     }
     responseLimit = parsedLimit;
+  }
+
+  if (targetResponsesInput.value.trim()) {
+    const parsedTarget = Number(targetResponsesInput.value.trim());
+    if (!Number.isSafeInteger(parsedTarget) || parsedTarget < 1 || parsedTarget > 1000000) {
+      showToast('Target sample size must be a whole number from 1 to 1,000,000.', 'error');
+      targetResponsesInput.focus();
+      return;
+    }
+    if (responseLimit !== null && parsedTarget > responseLimit) {
+      showToast('Target sample size cannot exceed the maximum response limit.', 'error');
+      targetResponsesInput.focus();
+      return;
+    }
+    targetResponses = parsedTarget;
   }
 
   if (!title) {
@@ -760,6 +829,7 @@ async function submitSurvey(targetStatus) {
     description,
     response_deadline: responseDeadline,
     response_limit: responseLimit,
+    target_responses: targetResponses,
     one_response_per_browser: oneResponsePerBrowser.checked,
     status: targetStatus,
     questions: questionsList

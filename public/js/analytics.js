@@ -56,6 +56,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Preparing CSV download...', 'info');
   });
 
+  document.getElementById('btn-save-analytics-view').addEventListener('click', saveAnalyticsView);
+
   document.getElementById('analytics-filter-form').addEventListener('submit', event => {
     event.preventDefault();
 
@@ -93,6 +95,28 @@ function buildDateQueryString() {
   if (currentDateFilters.to) params.set('to', currentDateFilters.to);
   const query = params.toString();
   return query ? `?${query}` : '';
+}
+
+async function saveAnalyticsView() {
+  const name = window.prompt('Name this analytics view');
+  if (!name) return;
+  try {
+    const response = await fetch('/api/saved-views', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        view_type: 'analytics',
+        survey_id: Number(currentSurveyId),
+        filters: { from: currentDateFilters.from, to: currentDateFilters.to }
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Unable to save analytics view.');
+    showToast('Analytics view saved.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Unable to save analytics view.', 'error');
+  }
 }
 
 function syncFilterUrl() {

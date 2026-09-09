@@ -4,6 +4,8 @@
  */
 
 let currentSurveyData = null;
+const SUBMISSION_MARKER_PREFIX = 'rsad:submitted:';
+const SUBMISSION_MARKER_VERSION = 1;
 
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
@@ -43,6 +45,12 @@ async function loadPublicSurvey(surveyId) {
       return;
     }
 
+    if (data.code === 'SURVEY_RESPONSE_LIMIT_REACHED') {
+      titleEl.textContent = data.title || 'Survey Full';
+      showSurveyMessage('Survey Full', data.error || 'This survey has reached its maximum number of responses.');
+      return;
+    }
+
     if (!res.ok) {
       showSurveyMessage('Unable to Access Survey', data.error || 'This survey is not currently accepting responses.');
       return;
@@ -59,10 +67,50 @@ async function loadPublicSurvey(surveyId) {
       descEl.style.display = 'none';
     }
 
+    if (data.one_response_per_browser && hasSubmittedBrowserMarker(data.id)) {
+      showSurveyMessage(
+        'Response Already Submitted',
+        'A response to this survey has already been submitted from this browser. Thank you for participating.'
+      );
+      return;
+    }
+
     renderRespondentForm(data);
   } catch (err) {
     console.error('Error loading public survey:', err);
     showSurveyMessage('Connection Error', 'Unable to load survey. Please check your internet connection and reload the page.');
+  }
+}
+
+function getSubmissionMarkerKey(surveyId) {
+  return `${SUBMISSION_MARKER_PREFIX}${surveyId}`;
+}
+
+function hasSubmittedBrowserMarker(surveyId) {
+  try {
+    const rawMarker = window.localStorage.getItem(getSubmissionMarkerKey(surveyId));
+    if (!rawMarker) return false;
+
+    const marker = JSON.parse(rawMarker);
+    return marker &&
+      marker.version === SUBMISSION_MARKER_VERSION &&
+      marker.submitted === true &&
+      typeof marker.submittedAt === 'string' &&
+      Number.isFinite(Date.parse(marker.submittedAt));
+  } catch (err) {
+    return false;
+  }
+}
+
+function saveSubmittedBrowserMarker(surveyId) {
+  try {
+    window.localStorage.setItem(getSubmissionMarkerKey(surveyId), JSON.stringify({
+      version: SUBMISSION_MARKER_VERSION,
+      submitted: true,
+      submittedAt: new Date().toISOString()
+    }));
+  } catch (err) {
+    // Storage can be unavailable or disabled. The accepted server response still succeeds.
   }
 }
 
@@ -323,10 +371,17 @@ async function handleFormSubmit(e) {
     const data = await res.json();
 
     if (res.ok && data.success) {
+      if (currentSurveyData.one_response_per_browser) {
+        saveSubmittedBrowserMarker(currentSurveyData.id);
+      }
       renderThankYouScreen();
     } else {
       if (data.code === 'SURVEY_EXPIRED') {
         showSurveyMessage('Survey Expired', data.error || 'This survey response deadline has passed.');
+        return;
+      }
+      if (data.code === 'SURVEY_RESPONSE_LIMIT_REACHED') {
+        showSurveyMessage('Survey Full', data.error || 'This survey has reached its maximum number of responses.');
         return;
       }
       showToast(data.error || 'Failed to submit response', 'error');

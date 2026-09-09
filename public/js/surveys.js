@@ -20,6 +20,15 @@ function getDeadlineDetails(responseDeadline) {
   return { hasPassed, formatted };
 }
 
+function getResponseLimitDetails(responseLimit, responseCount) {
+  if (!Number.isSafeInteger(responseLimit) || responseLimit < 1) return null;
+  const reached = responseCount >= responseLimit;
+  return {
+    reached,
+    label: `${responseCount} / ${responseLimit}${reached ? ' · Limit reached' : ' responses'}`
+  };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
   if (!user) return;
@@ -114,6 +123,7 @@ function renderSurveyRows() {
           ? 'badge-closed' 
           : 'badge-draft';
       const deadline = getDeadlineDetails(survey.response_deadline);
+      const responseLimit = getResponseLimitDetails(survey.response_limit, survey.response_count);
 
       // Build context-sensitive action buttons
       let statusActionBtn = '';
@@ -146,6 +156,7 @@ function renderSurveyRows() {
         <td>
           <div style="font-weight: 600; color: var(--color-text); font-size: 15px;">${escapeHtml(survey.title)}</div>
           ${survey.description ? `<div style="font-size: 12.5px; color: var(--color-text-muted); margin-top: 2px;">${escapeHtml(survey.description)}</div>` : ''}
+          ${survey.one_response_per_browser ? '<div style="font-size: 12px; color: var(--color-text-muted); margin-top: 5px;">Repeat protection: On (same browser)</div>' : ''}
           ${deadline ? `<div class="survey-deadline ${deadline.hasPassed ? 'is-passed' : ''}">${deadline.hasPassed ? 'Response deadline passed' : `Responses close: ${escapeHtml(deadline.formatted)}`}</div>` : ''}
         </td>
         <td>
@@ -153,7 +164,8 @@ function renderSurveyRows() {
           ${deadline && deadline.hasPassed ? '<span class="badge badge-deadline-passed">Expired</span>' : ''}
         </td>
         <td>
-          <strong style="color: var(--color-primary); font-size: 15px;">${survey.response_count}</strong>
+          <strong style="color: var(--color-primary); font-size: 15px;">${responseLimit ? escapeHtml(responseLimit.label) : survey.response_count}</strong>
+          ${responseLimit && responseLimit.reached ? '<div class="survey-limit-reached">Response limit reached</div>' : ''}
         </td>
         <td style="color: var(--color-text-muted); font-size: 13px;">
           ${dateStr}

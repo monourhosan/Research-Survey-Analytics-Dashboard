@@ -41,6 +41,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('survey-title').addEventListener('input', scheduleLocalDraftSave);
   document.getElementById('survey-description').addEventListener('input', scheduleLocalDraftSave);
   document.getElementById('response-deadline').addEventListener('input', scheduleLocalDraftSave);
+  document.getElementById('response-limit-enabled').addEventListener('change', () => {
+    syncResponseLimitFields();
+    scheduleLocalDraftSave();
+  });
+  document.getElementById('response-limit').addEventListener('input', scheduleLocalDraftSave);
+  document.getElementById('one-response-per-browser').addEventListener('change', scheduleLocalDraftSave);
   document.getElementById('btn-restore-local-draft').addEventListener('click', restorePendingLocalDraft);
   document.getElementById('btn-discard-local-draft').addEventListener('click', discardPendingLocalDraft);
 
@@ -86,6 +92,9 @@ function getCurrentDraftContent() {
     title: document.getElementById('survey-title').value,
     description: document.getElementById('survey-description').value,
     response_deadline: document.getElementById('response-deadline').value,
+    response_limit_enabled: document.getElementById('response-limit-enabled').checked,
+    response_limit: document.getElementById('response-limit').value,
+    one_response_per_browser: document.getElementById('one-response-per-browser').checked,
     questions: cloneDraftQuestions(questionsList)
   };
 }
@@ -95,6 +104,9 @@ function getDraftFingerprint(content) {
     title: content.title,
     description: content.description,
     response_deadline: content.response_deadline || '',
+    response_limit_enabled: Boolean(content.response_limit_enabled),
+    response_limit: content.response_limit || '',
+    one_response_per_browser: Boolean(content.one_response_per_browser),
     questions: content.questions.map(question => ({
       question_text: question.question_text,
       question_type: question.question_type,
@@ -179,6 +191,10 @@ function restorePendingLocalDraft() {
   document.getElementById('survey-title').value = content.title || '';
   document.getElementById('survey-description').value = content.description || '';
   document.getElementById('response-deadline').value = content.response_deadline || '';
+  document.getElementById('response-limit-enabled').checked = Boolean(content.response_limit_enabled);
+  document.getElementById('response-limit').value = content.response_limit || '';
+  document.getElementById('one-response-per-browser').checked = Boolean(content.one_response_per_browser);
+  syncResponseLimitFields();
   questionsList = cloneDraftQuestions(content.questions);
   renderQuestions();
   hasUnsavedBuilderChanges = false;
@@ -206,6 +222,10 @@ async function loadExistingSurvey(id) {
     document.getElementById('survey-title').value = data.title;
     document.getElementById('survey-description').value = data.description || '';
     document.getElementById('response-deadline').value = toDateTimeLocalValue(data.response_deadline);
+    document.getElementById('response-limit-enabled').checked = Number.isSafeInteger(data.response_limit) && data.response_limit > 0;
+    document.getElementById('response-limit').value = data.response_limit || '';
+    document.getElementById('one-response-per-browser').checked = data.one_response_per_browser === 1 || data.one_response_per_browser === true;
+    syncResponseLimitFields();
 
     if (data.response_count > 0) {
       hasExistingResponses = true;
@@ -238,6 +258,14 @@ function toDateTimeLocalValue(isoValue) {
   if (Number.isNaN(date.getTime())) return '';
   const pad = value => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function syncResponseLimitFields() {
+  const enabled = document.getElementById('response-limit-enabled').checked;
+  const fields = document.getElementById('response-limit-fields');
+  const input = document.getElementById('response-limit');
+  fields.hidden = !enabled;
+  input.disabled = !enabled;
 }
 
 // Add Question Helper
@@ -660,10 +688,14 @@ async function submitSurvey(targetStatus) {
   const titleInput = document.getElementById('survey-title');
   const descInput = document.getElementById('survey-description');
   const deadlineInput = document.getElementById('response-deadline');
+  const responseLimitEnabled = document.getElementById('response-limit-enabled');
+  const responseLimitInput = document.getElementById('response-limit');
+  const oneResponsePerBrowser = document.getElementById('one-response-per-browser');
 
   const title = titleInput.value.trim();
   const description = descInput.value.trim();
   let responseDeadline = null;
+  let responseLimit = null;
 
   if (deadlineInput.value) {
     const parsedDeadline = new Date(deadlineInput.value);
@@ -678,6 +710,17 @@ async function submitSurvey(targetStatus) {
       deadlineInput.focus();
       return;
     }
+  }
+
+  if (responseLimitEnabled.checked) {
+    const rawLimit = responseLimitInput.value.trim();
+    const parsedLimit = Number(rawLimit);
+    if (!rawLimit || !Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 1000000) {
+      showToast('Maximum responses must be a whole number from 1 to 1,000,000.', 'error');
+      responseLimitInput.focus();
+      return;
+    }
+    responseLimit = parsedLimit;
   }
 
   if (!title) {
@@ -716,6 +759,8 @@ async function submitSurvey(targetStatus) {
     title,
     description,
     response_deadline: responseDeadline,
+    response_limit: responseLimit,
+    one_response_per_browser: oneResponsePerBrowser.checked,
     status: targetStatus,
     questions: questionsList
   };

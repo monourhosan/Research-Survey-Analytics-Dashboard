@@ -104,7 +104,7 @@
                 >
               </div>
 
-              <div class="form-group" style="margin-bottom: 0;">
+              <div class="form-group">
                 <label for="survey-description" class="form-label">Description / Researcher Note</label>
                 <textarea 
                   id="survey-description" 
@@ -112,6 +112,12 @@
                   rows="3" 
                   placeholder="Briefly state the research objective and context for respondents..."
                 ></textarea>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="response-deadline" class="form-label">Response Deadline <span class="form-label-optional">(optional)</span></label>
+                <input type="datetime-local" id="response-deadline" class="form-input">
+                <p class="form-help-text">Leave blank to keep the survey open until you close it manually. Times are saved in UTC and enforced by the server.</p>
               </div>
             </div>
           </div>

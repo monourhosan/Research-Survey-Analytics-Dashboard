@@ -21,11 +21,13 @@
   --color-primary: #181818;          /* Rich Charcoal / Jet Black */
   --color-primary-dark: #000000;     /* Pure Black Hover */
   --color-primary-light: #2d2d2d;    /* Soft Black Accent */
+  --color-primary-hover: #000000;    /* Alias for reusable interactive states */
   --color-secondary: #181818;        /* Unified Palette Black */
   --color-secondary-dark: #2a2a2a;   /* Secondary Hover */
   --color-accent: #181818;           /* High Contrast Focus */
   --color-background: #f2eedf;       /* Warm Cream Canvas */
   --color-surface: #ffffff;          /* Crisp Card Surface */
+  --color-surface-secondary: #faf7f0;/* Soft cream-tinted surface */
   --color-text: #181818;             /* Slate/Charcoal High Contrast Text */
   --color-text-muted: #555555;       /* Muted Body & Label Text */
   --color-border: #cccccc;           /* Light Gray Border */
@@ -43,8 +45,16 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+  --radius-xl: 22px;
   --sidebar-width: 250px;
   --header-height: 64px;
+
+  /* Shared rhythm for the redesigned workspace */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
 
   /* Shadows */
   --shadow-sm: 0 1px 3px rgba(24, 24, 24, 0.05), 0 1px 2px rgba(24, 24, 24, 0.03);
@@ -1630,6 +1640,304 @@ dialog.custom-modal::backdrop {
 /* ==========================================================================
    RESPONSIVE DESIGN (Tablets & Mobile)
    ========================================================================== */
+/* ===========================================================================
+   REDESIGNED ADMIN WORKSPACE
+   The structure takes inspiration from the supplied reference; the established
+   black, cream, and gray palette above remains the application identity.
+   ========================================================================== */
+body.admin-page {
+  min-width: 320px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at 4% 0%, rgba(255, 255, 255, 0.92), transparent 29rem),
+    linear-gradient(135deg, #e9e5d8 0%, var(--color-background) 55%, #e5e0d1 100%);
+}
+
+.admin-page .app-container {
+  position: relative;
+  width: min(1480px, 100%);
+  min-height: calc(100vh - 44px);
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(24, 24, 24, 0.12);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-secondary);
+  box-shadow: 0 22px 60px rgba(24, 24, 24, 0.12), 0 4px 12px rgba(24, 24, 24, 0.05);
+}
+
+.admin-page .sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 264px;
+  border: 0;
+  border-right: 1px solid rgba(24, 24, 24, 0.1);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.admin-page .sidebar-header {
+  height: 92px;
+  padding: 0 24px;
+  border-bottom: 0;
+}
+
+.admin-page .brand-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  font-size: 18px;
+  box-shadow: 0 5px 12px rgba(24, 24, 24, 0.16);
+}
+
+.admin-page .brand-title {
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.admin-page .brand-subtitle {
+  font-size: 10.5px;
+  margin-top: 2px;
+}
+
+.admin-page .sidebar-nav {
+  gap: 5px;
+  padding: 12px 14px 22px;
+}
+
+.admin-page .sidebar-nav::before {
+  content: 'WORKSPACE';
+  padding: 12px 10px 7px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.admin-page .nav-link {
+  min-height: 44px;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #5c5c5c;
+}
+
+.admin-page .nav-link > span {
+  width: 18px;
+  text-align: center;
+  font-size: 15px;
+  filter: grayscale(1);
+}
+
+.admin-page .nav-link:hover {
+  border-color: var(--color-border);
+  background: var(--color-surface-secondary);
+}
+
+.admin-page .nav-link.active {
+  position: relative;
+  border-color: var(--color-primary);
+  box-shadow: 0 3px 8px rgba(24, 24, 24, 0.1);
+}
+
+.admin-page .nav-link.active::before {
+  position: absolute;
+  left: -15px;
+  width: 3px;
+  height: 24px;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-primary);
+  content: '';
+}
+
+.admin-page .nav-link.active > span {
+  filter: none;
+}
+
+.admin-page .sidebar-footer {
+  gap: 12px;
+  padding: 18px 20px 20px;
+  border-top: 1px solid rgba(24, 24, 24, 0.1);
+  background: rgba(250, 247, 240, 0.64);
+}
+
+.admin-page .user-avatar {
+  width: 36px;
+  height: 36px;
+  border: 2px solid var(--palette-cream);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.admin-page .btn-logout {
+  min-height: 38px;
+  border-radius: 9px;
+}
+
+.admin-page .main-wrapper {
+  min-height: calc(100vh - 44px);
+  margin-left: 264px;
+  background: rgba(250, 247, 240, 0.74);
+}
+
+.admin-page .top-header {
+  height: 92px;
+  padding: 0 30px;
+  border-bottom: 1px solid rgba(24, 24, 24, 0.1);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(12px);
+}
+
+.admin-page .header-title-section h1 {
+  font-size: clamp(20px, 2vw, 25px);
+  letter-spacing: -0.035em;
+}
+
+.admin-page .header-title-section p {
+  max-width: 590px;
+  margin-top: 3px;
+  font-size: 12.5px;
+}
+
+.admin-page .header-actions { gap: 9px; }
+
+.admin-page .content-area {
+  max-width: 1420px;
+  padding: 28px 30px 36px;
+}
+
+.admin-page .metrics-grid {
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.admin-page .metric-card {
+  position: relative;
+  min-height: 146px;
+  padding: 20px;
+  overflow: hidden;
+  border-color: rgba(24, 24, 24, 0.12);
+  border-radius: 15px;
+  box-shadow: 0 2px 5px rgba(24, 24, 24, 0.04);
+}
+
+.admin-page .metric-card::after {
+  position: absolute;
+  top: 17px;
+  right: 17px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  content: '↗';
+  font-size: 13px;
+}
+
+.admin-page .metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.admin-page .metric-label {
+  font-size: 11px;
+  letter-spacing: 0.07em;
+}
+
+.admin-page .metric-value {
+  margin-top: 2px;
+  font-size: clamp(29px, 3vw, 38px);
+  letter-spacing: -0.055em;
+}
+
+.admin-page .card,
+.admin-page .question-analysis-card,
+.admin-page .question-builder-item {
+  border-color: rgba(24, 24, 24, 0.12);
+  border-radius: 15px;
+  box-shadow: 0 2px 5px rgba(24, 24, 24, 0.04);
+}
+
+.admin-page .card-header {
+  min-height: 74px;
+  padding: 17px 20px;
+  border-bottom-color: rgba(24, 24, 24, 0.1);
+}
+
+.admin-page .card-title { letter-spacing: -0.02em; }
+.admin-page .card-body { padding: 20px; }
+
+.admin-page .btn {
+  min-height: 38px;
+  border-radius: 9px;
+  padding: 8px 14px;
+}
+
+.admin-page .btn-sm {
+  min-height: 34px;
+  padding: 6px 11px;
+  border-radius: 8px;
+}
+
+.admin-page .form-input,
+.admin-page .form-textarea,
+.admin-page .form-select {
+  border-color: #c8c5bd;
+  border-radius: 9px;
+}
+
+.admin-page .form-input,
+.admin-page .form-select { min-height: 42px; }
+.admin-page .form-textarea { min-height: 108px; }
+
+.admin-page .data-table th {
+  padding: 13px 20px;
+  background: var(--color-surface-secondary);
+}
+
+.admin-page .data-table td { padding: 17px 20px; }
+
+.admin-page .mobile-toggle {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  font-size: 19px;
+}
+
+@media (max-width: 1120px) {
+  body.admin-page { padding: 12px; }
+  .admin-page .app-container,
+  .admin-page .main-wrapper { min-height: calc(100vh - 24px); }
+  .admin-page .sidebar { width: 236px; }
+  .admin-page .main-wrapper { margin-left: 236px; }
+  .admin-page .content-area { padding: 24px; }
+}
+
+@media (max-width: 992px) {
+  body.admin-page { padding: 0; background: var(--color-surface-secondary); }
+  .admin-page .app-container { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+  .admin-page .sidebar {
+    position: fixed;
+    width: min(286px, 82vw);
+    box-shadow: var(--shadow-lg);
+  }
+  .admin-page .sidebar.open { transform: translateX(0); }
+  .admin-page .main-wrapper { min-height: 100vh; margin-left: 0; }
+  .admin-page .mobile-toggle { display: inline-grid; place-items: center; }
+}
+
+@media (max-width: 600px) {
+  .admin-page .top-header { height: auto; min-height: 76px; padding: 14px 16px; align-items: flex-start; gap: 12px; }
+  .admin-page .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .admin-page .header-title-section p { display: none; }
+  .admin-page .content-area { padding: 18px 16px 28px; }
+  .admin-page .metrics-grid { gap: 11px; }
+  .admin-page .metric-card { min-height: 126px; }
+  .admin-page .card-header { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+}
+
 @media (max-width: 992px) {
   .sidebar {
     transform: translateX(-100%);

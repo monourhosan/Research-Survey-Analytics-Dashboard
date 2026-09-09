@@ -56,6 +56,9 @@
           </div>
         </div>
         <div class="header-actions">
+          <div id="draft-save-status" class="draft-save-status" aria-live="polite" role="status">
+            Local recovery is ready
+          </div>
           <button type="button" id="btn-preview-survey" class="btn btn-secondary btn-sm">
             Preview
           </button>
@@ -70,6 +73,17 @@
 
       <main class="content-area" style="max-width: 900px;">
         <form id="survey-builder-form">
+          <section id="draft-recovery-notice" class="draft-recovery-notice" hidden aria-live="polite">
+            <div>
+              <strong>A newer locally saved draft was found.</strong>
+              <p>Restore it to continue where you left off, or discard it and keep the current survey version.</p>
+            </div>
+            <div class="draft-recovery-actions">
+              <button type="button" id="btn-restore-local-draft" class="btn btn-primary btn-sm">Restore Draft</button>
+              <button type="button" id="btn-discard-local-draft" class="btn btn-secondary btn-sm">Discard Draft</button>
+            </div>
+          </section>
+
           <!-- Survey Metadata Card -->
           <div class="card">
             <div class="card-header">

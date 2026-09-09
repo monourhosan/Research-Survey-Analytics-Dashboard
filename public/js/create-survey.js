@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('survey-title').addEventListener('input', scheduleLocalDraftSave);
   document.getElementById('survey-description').addEventListener('input', scheduleLocalDraftSave);
+  document.getElementById('response-deadline').addEventListener('input', scheduleLocalDraftSave);
   document.getElementById('btn-restore-local-draft').addEventListener('click', restorePendingLocalDraft);
   document.getElementById('btn-discard-local-draft').addEventListener('click', discardPendingLocalDraft);
 
@@ -84,6 +85,7 @@ function getCurrentDraftContent() {
   return {
     title: document.getElementById('survey-title').value,
     description: document.getElementById('survey-description').value,
+    response_deadline: document.getElementById('response-deadline').value,
     questions: cloneDraftQuestions(questionsList)
   };
 }
@@ -92,6 +94,7 @@ function getDraftFingerprint(content) {
   return JSON.stringify({
     title: content.title,
     description: content.description,
+    response_deadline: content.response_deadline || '',
     questions: content.questions.map(question => ({
       question_text: question.question_text,
       question_type: question.question_type,
@@ -175,6 +178,7 @@ function restorePendingLocalDraft() {
   const { content } = pendingRecoveryDraft;
   document.getElementById('survey-title').value = content.title || '';
   document.getElementById('survey-description').value = content.description || '';
+  document.getElementById('response-deadline').value = content.response_deadline || '';
   questionsList = cloneDraftQuestions(content.questions);
   renderQuestions();
   hasUnsavedBuilderChanges = false;
@@ -201,6 +205,7 @@ async function loadExistingSurvey(id) {
     const data = await res.json();
     document.getElementById('survey-title').value = data.title;
     document.getElementById('survey-description').value = data.description || '';
+    document.getElementById('response-deadline').value = toDateTimeLocalValue(data.response_deadline);
 
     if (data.response_count > 0) {
       hasExistingResponses = true;
@@ -225,6 +230,14 @@ async function loadExistingSurvey(id) {
     console.error('Error loading survey:', err);
     showToast('Failed to load survey details', 'error');
   }
+}
+
+function toDateTimeLocalValue(isoValue) {
+  if (!isoValue) return '';
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 // Add Question Helper
@@ -646,9 +659,26 @@ function openSurveyPreview() {
 async function submitSurvey(targetStatus) {
   const titleInput = document.getElementById('survey-title');
   const descInput = document.getElementById('survey-description');
+  const deadlineInput = document.getElementById('response-deadline');
 
   const title = titleInput.value.trim();
   const description = descInput.value.trim();
+  let responseDeadline = null;
+
+  if (deadlineInput.value) {
+    const parsedDeadline = new Date(deadlineInput.value);
+    if (Number.isNaN(parsedDeadline.getTime())) {
+      showToast('Please choose a valid response deadline.', 'error');
+      deadlineInput.focus();
+      return;
+    }
+    responseDeadline = parsedDeadline.toISOString();
+    if (targetStatus === 'active' && parsedDeadline.getTime() <= Date.now()) {
+      showToast('A published survey response deadline must be in the future.', 'error');
+      deadlineInput.focus();
+      return;
+    }
+  }
 
   if (!title) {
     showToast('Please provide a survey title', 'error');
@@ -685,6 +715,7 @@ async function submitSurvey(targetStatus) {
   const payload = {
     title,
     description,
+    response_deadline: responseDeadline,
     status: targetStatus,
     questions: questionsList
   };

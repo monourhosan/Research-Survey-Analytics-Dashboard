@@ -9,6 +9,17 @@ function getPublicSurveyUrl(id) {
   return `${window.location.origin}/survey.html?id=${encodeURIComponent(id)}`;
 }
 
+function getDeadlineDetails(responseDeadline) {
+  if (!responseDeadline) return null;
+  const deadline = new Date(responseDeadline);
+  if (Number.isNaN(deadline.getTime())) return null;
+  const hasPassed = deadline.getTime() <= Date.now();
+  const formatted = deadline.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+  return { hasPassed, formatted };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
   if (!user) return;
@@ -102,6 +113,7 @@ function renderSurveyRows() {
         : survey.status === 'closed' 
           ? 'badge-closed' 
           : 'badge-draft';
+      const deadline = getDeadlineDetails(survey.response_deadline);
 
       // Build context-sensitive action buttons
       let statusActionBtn = '';
@@ -134,9 +146,11 @@ function renderSurveyRows() {
         <td>
           <div style="font-weight: 600; color: var(--color-text); font-size: 15px;">${escapeHtml(survey.title)}</div>
           ${survey.description ? `<div style="font-size: 12.5px; color: var(--color-text-muted); margin-top: 2px;">${escapeHtml(survey.description)}</div>` : ''}
+          ${deadline ? `<div class="survey-deadline ${deadline.hasPassed ? 'is-passed' : ''}">${deadline.hasPassed ? 'Response deadline passed' : `Responses close: ${escapeHtml(deadline.formatted)}`}</div>` : ''}
         </td>
         <td>
           <span class="badge ${badgeClass}">${escapeHtml(survey.status)}</span>
+          ${deadline && deadline.hasPassed ? '<span class="badge badge-deadline-passed">Expired</span>' : ''}
         </td>
         <td>
           <strong style="color: var(--color-primary); font-size: 15px;">${survey.response_count}</strong>

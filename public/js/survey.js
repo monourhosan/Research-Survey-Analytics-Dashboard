@@ -37,6 +37,12 @@ async function loadPublicSurvey(surveyId) {
       return;
     }
 
+    if (data.code === 'SURVEY_EXPIRED') {
+      titleEl.textContent = data.title || 'Survey Expired';
+      showSurveyMessage('Survey Expired', data.error || 'This survey response deadline has passed.');
+      return;
+    }
+
     if (!res.ok) {
       showSurveyMessage('Unable to Access Survey', data.error || 'This survey is not currently accepting responses.');
       return;
@@ -319,6 +325,10 @@ async function handleFormSubmit(e) {
     if (res.ok && data.success) {
       renderThankYouScreen();
     } else {
+      if (data.code === 'SURVEY_EXPIRED') {
+        showSurveyMessage('Survey Expired', data.error || 'This survey response deadline has passed.');
+        return;
+      }
       showToast(data.error || 'Failed to submit response', 'error');
       submitBtn.disabled = false;
       submitBtn.textContent = 'Submit Response';

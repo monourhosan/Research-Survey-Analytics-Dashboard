@@ -116,6 +116,13 @@ function isSurveyResponseLimitReached(responseLimit, responseCount) {
   return Number.isSafeInteger(responseLimit) && responseLimit > 0 && responseCount >= responseLimit;
 }
 
+function normalizeOneResponsePerBrowser(value) {
+  if (value === undefined || value === null) return { value: 0 };
+  if (typeof value === 'boolean') return { value: value ? 1 : 0 };
+  if (value === 0 || value === 1) return { value };
+  return { error: 'Browser duplicate-response protection must be enabled or disabled.' };
+}
+
 async function getSurveyResponseCount(surveyId) {
   const row = await dbGet('SELECT COUNT(*) AS count FROM responses WHERE survey_id = ?', [surveyId]);
   return row ? row.count : 0;
@@ -241,6 +248,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         s.status, 
         s.response_deadline,
         s.response_limit,
+        s.one_response_per_browser,
         s.created_at,
         COUNT(r.id) AS response_count
       FROM surveys s
@@ -281,6 +289,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
         s.status, 
         s.response_deadline,
         s.response_limit,
+        s.one_response_per_browser,
         s.created_at,
         s.updated_at,
         COUNT(r.id) AS response_count
@@ -302,7 +311,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
  */
 app.post('/api/surveys', requireAuth, async (req, res) => {
   try {
-    const { title, description, questions, status, response_deadline, response_limit } = req.body;
+    const { title, description, questions, status, response_deadline, response_limit, one_response_per_browser } = req.body;
 
     if (!title || title.trim().length === 0) {
       return res.status(400).json({ error: 'Survey title is required' });
@@ -321,6 +330,10 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
     if (normalizedLimit.error) {
       return res.status(400).json({ error: normalizedLimit.error });
     }
+    const normalizedBrowserProtection = normalizeOneResponsePerBrowser(one_response_per_browser);
+    if (normalizedBrowserProtection.error) {
+      return res.status(400).json({ error: normalizedBrowserProtection.error });
+    }
 
     if (surveyStatus === 'active' && isSurveyExpired(normalizedDeadline.value)) {
       return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
@@ -333,8 +346,8 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 
     // Insert survey
     const result = await dbRun(
-      'INSERT INTO surveys (title, description, status, response_deadline, response_limit) VALUES (?, ?, ?, ?, ?)',
-      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value, normalizedLimit.value]
+      'INSERT INTO surveys (title, description, status, response_deadline, response_limit, one_response_per_browser) VALUES (?, ?, ?, ?, ?, ?)',
+      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value]
     );
 
     const surveyId = result.lastID;
@@ -454,14 +467,21 @@ app.put('/api/surveys/:id', requireAuth, async (req, res) => {
     if (normalizedLimit.error) {
       return res.status(400).json({ error: normalizedLimit.error });
     }
+    const browserProtectionWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'one_response_per_browser');
+    const normalizedBrowserProtection = browserProtectionWasProvided
+      ? normalizeOneResponsePerBrowser(req.body.one_response_per_browser)
+      : { value: existing.one_response_per_browser || 0 };
+    if (normalizedBrowserProtection.error) {
+      return res.status(400).json({ error: normalizedBrowserProtection.error });
+    }
 
     if (existing.status === 'active' && isSurveyExpired(normalizedDeadline.value)) {
       return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
     }
 
     await dbRun(
-      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, response_limit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, normalizedLimit.value, surveyId]
+      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, response_limit = ?, one_response_per_browser = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value, surveyId]
     );
 
     // If questions array passed, sync questions
@@ -670,7 +690,7 @@ app.delete('/api/questions/:id', requireAuth, async (req, res) => {
 app.get('/api/public/surveys/:id', async (req, res) => {
   try {
     const surveyId = parseInt(req.params.id, 10);
-    const survey = await dbGet('SELECT id, title, description, status, response_deadline, response_limit FROM surveys WHERE id = ?', [surveyId]);
+    const survey = await dbGet('SELECT id, title, description, status, response_deadline, response_limit, one_response_per_browser FROM surveys WHERE id = ?', [surveyId]);
 
     if (!survey) {
       return res.status(404).json({ error: 'Survey not found' });
@@ -722,6 +742,7 @@ app.get('/api/public/surveys/:id', async (req, res) => {
       status: survey.status,
       response_deadline: survey.response_deadline,
       response_limit: survey.response_limit,
+      one_response_per_browser: survey.one_response_per_browser === 1,
       response_count: responseCount,
       questions: questions.map(q => ({
         id: q.id,

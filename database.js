@@ -208,6 +208,7 @@ async function initDatabase() {
           status TEXT DEFAULT 'draft',
           response_deadline TEXT,
           response_limit INTEGER,
+          one_response_per_browser INTEGER NOT NULL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -220,6 +221,9 @@ async function initDatabase() {
       }
       if (!surveyColumns.some(column => column.name === 'response_limit')) {
         db.run('ALTER TABLE surveys ADD COLUMN response_limit INTEGER');
+      }
+      if (!surveyColumns.some(column => column.name === 'one_response_per_browser')) {
+        db.run('ALTER TABLE surveys ADD COLUMN one_response_per_browser INTEGER NOT NULL DEFAULT 0');
       }
 
       db.run(`

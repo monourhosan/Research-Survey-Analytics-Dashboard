@@ -63,6 +63,9 @@
           <button type="button" id="btn-preview-survey" class="btn btn-secondary btn-sm">
             Preview
           </button>
+          <button type="button" id="btn-use-template" class="btn btn-secondary btn-sm">
+            My Templates
+          </button>
           <button type="button" id="btn-save-draft" class="btn btn-secondary btn-sm">
             Save Draft
           </button>
@@ -83,6 +86,12 @@
               <button type="button" id="btn-restore-local-draft" class="btn btn-primary btn-sm">Restore Draft</button>
               <button type="button" id="btn-discard-local-draft" class="btn btn-secondary btn-sm">Discard Draft</button>
             </div>
+          </section>
+
+          <section id="survey-readiness-card" class="readiness-card" hidden aria-live="polite">
+            <strong id="survey-readiness-title">Survey readiness</strong>
+            <span id="survey-readiness-summary"></span>
+            <ul id="survey-readiness-list"></ul>
           </section>
 
           <!-- Survey Metadata Card -->
@@ -148,6 +157,12 @@
                   <input type="number" id="response-limit" class="form-input" min="1" max="1000000" step="1" inputmode="numeric" placeholder="e.g., 200">
                 </div>
                 <p class="form-help-text">When enabled, the survey automatically stops accepting new responses at this number. Leave it disabled for unlimited responses.</p>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="target-responses" class="form-label">Target sample size <span class="form-label-optional">(optional)</span></label>
+                <input type="number" id="target-responses" class="form-input" min="1" max="1000000" step="1" inputmode="numeric" placeholder="e.g., 200">
+                <p class="form-help-text">A research goal only. It does not close the survey; maximum responses remains the hard limit.</p>
               </div>
 
               <div class="form-group" style="margin-bottom: 0;">

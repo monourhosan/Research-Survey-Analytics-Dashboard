@@ -402,6 +402,65 @@ a:hover {
   color: var(--badge-closed-text);
 }
 
+.badge-deadline-passed {
+  margin-top: 6px;
+  background-color: #fce7e7;
+  color: #9f1f1f;
+}
+
+.survey-deadline {
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.survey-deadline.is-passed {
+  color: #9f1f1f;
+}
+
+.form-label-optional,
+.form-help-text {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.form-help-text {
+  margin: 7px 0 0;
+  line-height: 1.45;
+}
+
+.limit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.limit-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+#response-limit-fields {
+  margin-top: 12px;
+}
+
+#response-limit-fields[hidden] {
+  display: none;
+}
+
+.survey-limit-reached {
+  margin-top: 4px;
+  color: #9f1f1f;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ==========================================================================
    METRIC SUMMARY CARDS
    ========================================================================== */
@@ -815,6 +874,12 @@ a:hover {
   width: 100%;
   max-width: 800px;
   margin: 16px 0;
+}
+
+.chart-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
 canvas.survey-chart {
@@ -1765,5 +1830,9 @@ dialog.custom-modal::backdrop {
 
   .chart-container {
     max-width: 100%;
+  }
+
+  .chart-actions {
+    display: none !important;
   }
 }

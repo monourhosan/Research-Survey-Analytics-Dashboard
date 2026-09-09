@@ -182,6 +182,14 @@ The current implementation is a **single-administrator research dashboard** inte
 - Closing or returning from preview restores the builder unchanged, which makes the feature useful for safe pre-publication review during demonstrations.
 - Draft and closed surveys remain unavailable for public sharing because the public API does not accept responses for those states.
 
+### 5.9 Browser-based survey draft recovery
+
+- The builder saves a small recovery record in browser `localStorage` after one second of inactivity, rather than sending each edit to the server.
+- Keys are namespaced per state: `rsad:survey-builder-draft:new` for a new survey and `rsad:survey-builder-draft:survey-<id>` for an existing survey, preventing two survey drafts from overwriting one another.
+- A recovery record contains only builder content (title, description, question order, types, options, required flags, schema version, and timestamp). It never contains credentials, cookies, session data, secrets, or respondent responses.
+- When a stored record differs from the loaded builder state, the administrator chooses **Restore Draft** or **Discard Draft**; server data is never overwritten silently.
+- The local record is cleared only after a successful intentional server save or publish. If storage or a server save fails, normal builder work continues and any recovery data is preserved where possible.
+
 ---
 
 ## 6. Technology Stack

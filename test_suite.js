@@ -286,6 +286,18 @@ async function runTests() {
       'TEST 20c: Builder preview uses local unsaved state and cannot submit public responses'
     );
 
+    // Test 20d: Builder exposes safe browser-local draft recovery without server autosave
+    assert(
+      builderPage.raw.includes('draft-recovery-notice') &&
+      builderScript.raw.includes('rsad:survey-builder-draft:') &&
+      builderScript.raw.includes('LOCAL_DRAFT_DEBOUNCE_MS = 1000') &&
+      builderScript.raw.includes('restorePendingLocalDraft') &&
+      builderScript.raw.includes('discardPendingLocalDraft') &&
+      builderScript.raw.includes('clearLocalDraft();') &&
+      !builderScript.raw.includes('localStorage.setItem(getLocalDraftKey(), JSON.stringify(payload))'),
+      'TEST 20d: Builder auto-saves recovery data locally and clears it only after successful server save'
+    );
+
     console.log('==============================================');
     console.log(`TEST SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
     console.log('==============================================');

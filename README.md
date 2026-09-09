@@ -71,6 +71,9 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
 9. **Survey Preview Before Publishing**:
    - Review the current builder state in a responsive respondent-style preview before publishing, including every question type, required indicators, consent text, and validation warnings.
    - Preview mode is strictly non-submittable: it stores no changes and cannot create a public survey response.
+10. **Browser-based Draft Recovery**:
+   - The survey builder debounces changes and saves a recovery copy only in the administrator's browser storage.
+   - On reopening the same new or existing survey, administrators can explicitly restore or discard a newer local draft. This is local recovery, not cloud or server autosave.
 
 ---
 

@@ -51,23 +51,38 @@
         <div style="display: flex; align-items: center; gap: 16px;">
           <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
           <div class="header-title-section">
+            <span class="page-kicker">Survey library</span>
             <h1>Research Surveys</h1>
-            <p>Manage surveys, share public links, and inspect analytics</p>
+            <p>Organize fieldwork, share active studies, and review incoming responses.</p>
           </div>
         </div>
         <div class="header-actions">
-          <a href="create-survey.html" class="btn btn-primary btn-sm">
-            <span>➕</span> Create Survey
+          <a href="create-survey.html" class="btn btn-primary dashboard-create-btn">
+            <span aria-hidden="true">＋</span> Create Survey
           </a>
         </div>
       </header>
 
-      <main class="content-area">
-        <div class="card">
+      <main class="content-area survey-library-content">
+        <section class="survey-library-intro" aria-label="Survey library overview">
+          <div>
+            <span class="page-kicker">Study management</span>
+            <h2>Every study in one focused workspace.</h2>
+            <p>Search your portfolio, check collection status, or open the right action for each study.</p>
+          </div>
+          <div class="survey-library-legend" aria-label="Survey status key">
+            <span><i class="legend-dot legend-dot-active"></i>Active</span>
+            <span><i class="legend-dot legend-dot-draft"></i>Draft</span>
+            <span><i class="legend-dot legend-dot-closed"></i>Closed</span>
+          </div>
+        </section>
+
+        <div class="card survey-inventory-card">
           <div class="card-header">
             <div>
+              <span class="page-kicker">Portfolio</span>
               <h2 class="card-title">Survey Inventory</h2>
-              <p class="card-subtitle">Complete list of research surveys in SQLite database</p>
+              <p class="card-subtitle">Search, filter, share, and manage all of your research surveys.</p>
             </div>
           </div>
 

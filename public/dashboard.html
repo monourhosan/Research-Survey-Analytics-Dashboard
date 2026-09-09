@@ -51,53 +51,68 @@
         <div style="display: flex; align-items: center; gap: 16px;">
           <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
           <div class="header-title-section">
-            <h1>Research Overview</h1>
-            <p>System summary metrics and recent survey response activity</p>
+            <span class="page-kicker">Research operations</span>
+            <h1>Research Dashboard</h1>
+            <p>Monitor your survey portfolio, response activity, and next research actions.</p>
           </div>
         </div>
         <div class="header-actions">
-          <a href="create-survey.html" class="btn btn-primary btn-sm">
-            <span>➕</span> New Survey
+          <a href="create-survey.html" class="btn btn-primary dashboard-create-btn">
+            <span aria-hidden="true">＋</span> Create Survey
           </a>
         </div>
       </header>
 
-      <main class="content-area">
+      <main class="content-area dashboard-content">
+        <section class="dashboard-intro" aria-label="Dashboard introduction">
+          <div>
+            <span class="page-kicker">Workspace summary</span>
+            <h2>Your research, at a glance.</h2>
+            <p>Use this overview to keep survey collection moving and find the studies that need attention.</p>
+          </div>
+          <a href="surveys.html" class="dashboard-text-link">View survey library <span aria-hidden="true">→</span></a>
+        </section>
+
         <!-- Metric Cards -->
-        <section class="metrics-grid">
-          <div class="metric-card">
+        <section class="metrics-grid dashboard-metrics" aria-label="Survey portfolio metrics">
+          <article class="metric-card dashboard-metric-card">
+            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">▦</div><span class="metric-trend">Portfolio</span></div>
             <div class="metric-label">Total Surveys</div>
             <div class="metric-value" id="stat-total-surveys">0</div>
             <div class="metric-meta">Across all research projects</div>
-          </div>
+          </article>
 
-          <div class="metric-card">
+          <article class="metric-card dashboard-metric-card metric-card-highlight">
+            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">↗</div><span class="metric-trend">Live now</span></div>
             <div class="metric-label">Active Surveys</div>
-            <div class="metric-value" id="stat-active-surveys" style="color: var(--color-secondary);">0</div>
+            <div class="metric-value" id="stat-active-surveys">0</div>
             <div class="metric-meta">Currently accepting responses</div>
-          </div>
+          </article>
 
-          <div class="metric-card">
+          <article class="metric-card dashboard-metric-card">
+            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">✓</div><span class="metric-trend">Archive</span></div>
             <div class="metric-label">Closed Surveys</div>
             <div class="metric-value" id="stat-closed-surveys">0</div>
             <div class="metric-meta">Archived historical studies</div>
-          </div>
+          </article>
 
-          <div class="metric-card">
+          <article class="metric-card dashboard-metric-card">
+            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">◌</div><span class="metric-trend">Collected</span></div>
             <div class="metric-label">Total Responses</div>
-            <div class="metric-value" id="stat-total-responses" style="color: var(--color-primary);">0</div>
+            <div class="metric-value" id="stat-total-responses">0</div>
             <div class="metric-meta">Total respondent submissions</div>
-          </div>
+          </article>
         </section>
 
         <!-- Recent Surveys Card -->
-        <section class="card">
+        <section class="card dashboard-recent-card">
           <div class="card-header">
             <div>
-              <h2 class="card-title">Recent Surveys</h2>
-              <p class="card-subtitle">Latest research survey campaigns and submission counts</p>
+              <span class="page-kicker">Latest activity</span>
+              <h2 class="card-title">Recent surveys</h2>
+              <p class="card-subtitle">Latest research campaigns and their current response counts.</p>
             </div>
-            <a href="surveys.html" class="btn btn-secondary btn-sm">View All Surveys →</a>
+            <a href="surveys.html" class="btn btn-secondary btn-sm">Manage surveys <span aria-hidden="true">→</span></a>
           </div>
 
           <div class="card-body" style="padding: 0;">

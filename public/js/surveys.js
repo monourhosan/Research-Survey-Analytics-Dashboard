@@ -5,6 +5,10 @@
 
 let allSurveys = [];
 
+function getPublicSurveyUrl(id) {
+  return `${window.location.origin}/survey.html?id=${encodeURIComponent(id)}`;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
   if (!user) return;
@@ -109,6 +113,9 @@ function renderSurveyRows() {
         `;
       } else if (survey.status === 'active') {
         statusActionBtn = `
+          <button type="button" class="btn btn-secondary btn-sm" onclick="openShareDialog(${survey.id})" title="Share survey">
+            <span>↗</span> Share
+          </button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="copySurveyLink(${survey.id})" title="Copy public response link">
             <span>🔗</span> Copy Link
           </button>
@@ -163,10 +170,10 @@ function clearSurveyFilters() {
 
 // Copy Public Link to Clipboard
 function copySurveyLink(id) {
-  const url = `${window.location.origin}/survey.html?id=${id}`;
+  const url = getPublicSurveyUrl(id);
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url)
-      .then(() => showToast('Public survey link copied to clipboard!', 'success'))
+      .then(() => showToast('Survey link copied to clipboard.', 'success'))
       .catch(() => fallbackCopy(url));
   } else {
     fallbackCopy(url);
@@ -180,7 +187,125 @@ function fallbackCopy(url) {
   input.select();
   document.execCommand('copy');
   document.body.removeChild(input);
-  showToast('Public survey link copied to clipboard!', 'success');
+  showToast('Survey link copied to clipboard.', 'success');
+}
+
+function ensureShareDialog() {
+  let dialog = document.getElementById('share-survey-dialog');
+  if (dialog) return dialog;
+
+  dialog = document.createElement('dialog');
+  dialog.id = 'share-survey-dialog';
+  dialog.className = 'custom-modal share-survey-modal';
+  dialog.setAttribute('aria-labelledby', 'share-dialog-title');
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
+function makeQrFilename(title) {
+  const safeTitle = String(title || 'survey')
+    .normalize('NFKD')
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  return `${safeTitle || 'survey'}-qr.png`;
+}
+
+function downloadQrCode(dataUrl, filename) {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  showToast('QR code downloaded.', 'success');
+}
+
+function qrToPngDataUrl(qr, cellSize = 6, margin = 4) {
+  const moduleCount = qr.getModuleCount();
+  const pixelSize = (moduleCount + margin * 2) * cellSize;
+  const canvas = document.createElement('canvas');
+  canvas.width = pixelSize;
+  canvas.height = pixelSize;
+  const context = canvas.getContext('2d');
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, pixelSize, pixelSize);
+  context.fillStyle = '#000000';
+  for (let row = 0; row < moduleCount; row += 1) {
+    for (let column = 0; column < moduleCount; column += 1) {
+      if (qr.isDark(row, column)) {
+        context.fillRect(
+          (column + margin) * cellSize,
+          (row + margin) * cellSize,
+          cellSize,
+          cellSize
+        );
+      }
+    }
+  }
+  return canvas.toDataURL('image/png');
+}
+
+function openShareDialog(id) {
+  const survey = allSurveys.find(item => Number(item.id) === Number(id));
+  if (!survey || survey.status !== 'active') {
+    showToast('Only active surveys can be publicly shared.', 'error');
+    return;
+  }
+
+  if (typeof qrcode !== 'function') {
+    showToast('QR generator failed to load. Please refresh and try again.', 'error');
+    return;
+  }
+
+  const url = getPublicSurveyUrl(survey.id);
+  const dialog = ensureShareDialog();
+  dialog.innerHTML = `
+    <div class="share-dialog-header">
+      <div>
+        <p class="share-dialog-kicker">Public survey sharing</p>
+        <h2 class="modal-title" id="share-dialog-title">Share ${escapeHtml(survey.title)}</h2>
+      </div>
+      <button type="button" class="share-dialog-close" id="share-dialog-close" aria-label="Close share dialog">&times;</button>
+    </div>
+    <p class="modal-desc">Scan this QR code or copy the public URL to invite respondents.</p>
+    <div class="share-dialog-content">
+      <div class="share-qr-frame" id="share-qr-code" aria-label="QR code for ${escapeHtml(survey.title)}"></div>
+      <div class="share-url-group">
+        <label class="form-label" for="share-public-url">Public survey URL</label>
+        <input id="share-public-url" class="form-input share-public-url" type="text" readonly value="${escapeHtml(url)}">
+        <p class="share-url-help">This URL uses the current application domain and survey ID ${escapeHtml(survey.id)}.</p>
+      </div>
+    </div>
+    <div class="modal-actions share-dialog-actions">
+      <button type="button" class="btn btn-secondary btn-sm" id="share-copy-link">Copy Link</button>
+      <button type="button" class="btn btn-primary btn-sm" id="share-download-qr">Download QR</button>
+      <button type="button" class="btn btn-secondary btn-sm" id="share-close-btn">Close</button>
+    </div>
+  `;
+
+  const qr = qrcode(0, 'M');
+  qr.addData(url, 'Byte');
+  qr.make();
+  const qrDataUrl = qrToPngDataUrl(qr);
+  const qrImage = document.createElement('img');
+  qrImage.src = qrDataUrl;
+  qrImage.alt = `QR code for ${survey.title}`;
+  qrImage.className = 'share-qr-image';
+  dialog.querySelector('#share-qr-code').replaceChildren(qrImage);
+
+  const closeDialog = () => dialog.close();
+  dialog.querySelector('#share-dialog-close').onclick = closeDialog;
+  dialog.querySelector('#share-close-btn').onclick = closeDialog;
+  dialog.querySelector('#share-copy-link').onclick = () => copySurveyLink(survey.id);
+  dialog.querySelector('#share-download-qr').onclick = () => downloadQrCode(qrDataUrl, makeQrFilename(survey.title));
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) closeDialog();
+  }, { once: true });
+
+  dialog.showModal();
 }
 
 // Publish Survey

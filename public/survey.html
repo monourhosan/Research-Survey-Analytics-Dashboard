@@ -11,10 +11,14 @@
   <div class="survey-public-card" id="survey-card">
     <!-- Header -->
     <header class="survey-public-header">
-      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-        <span style="background: rgba(242, 238, 223, 0.2); color: var(--palette-cream); padding: 3px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
-          Research Questionnaire
-        </span>
+      <div class="public-survey-brand" aria-label="Research Survey Analytics Dashboard">
+        <span class="public-survey-brand-mark" aria-hidden="true">R</span>
+        <span>Research Survey Analytics</span>
+      </div>
+      <div class="public-survey-header-meta">
+        <span>Research questionnaire</span>
+        <span aria-hidden="true">•</span>
+        <span>Participant form</span>
       </div>
       <h1 id="survey-title">Loading survey...</h1>
       <p id="survey-desc"></p>
@@ -28,6 +32,8 @@
       </div>
     </div>
   </div>
+
+  <p class="public-survey-footer">Your responses are used only for the research purpose described in this questionnaire.</p>
 
   <div id="toast-container"></div>
   <script src="js/common.js"></script>

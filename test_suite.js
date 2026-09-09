@@ -274,6 +274,18 @@ async function runTests() {
       'TEST 20b: Survey page includes the local QR generator asset'
     );
 
+    const builderPage = await request('GET', '/create-survey.html');
+    const builderScript = await request('GET', '/js/create-survey.js');
+    assert(
+      builderPage.status === 200 &&
+      builderPage.raw.includes('btn-preview-survey') &&
+      builderScript.status === 200 &&
+      builderScript.raw.includes('openSurveyPreview') &&
+      builderScript.raw.includes('Preview Mode — responses cannot be submitted.') &&
+      !builderScript.raw.includes('/api/public/surveys'),
+      'TEST 20c: Builder preview uses local unsaved state and cannot submit public responses'
+    );
+
     console.log('==============================================');
     console.log(`TEST SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
     console.log('==============================================');

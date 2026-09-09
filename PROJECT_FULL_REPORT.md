@@ -172,6 +172,14 @@ The current implementation is a **single-administrator research dashboard** inte
 - QR generation runs locally in the browser through the MIT-licensed `qrcode-generator` package; no survey URL is sent to an online QR service.
 - Administrators can copy the link or download a sanitized `<survey-title>-qr.png` image.
 - The native dialog is keyboard accessible, closes with its Close button or Escape, and adapts to mobile widths.
+
+### 5.8 Survey preview before publishing
+
+- The survey builder provides **Preview** actions alongside Save Draft and Publish, including when the survey has not yet been saved.
+- Preview renders the current in-memory title, description, question order, required status, question types, answer choices, and consent statement in a respondent-style modal.
+- It supports rating, multiple-choice, yes/no, and short-text questions, while clearly identifying incomplete draft content and empty survey states.
+- A persistent **Preview Mode — responses cannot be submitted** message and disabled submission control keep the preview isolated from public response APIs and stored survey data.
+- Closing or returning from preview restores the builder unchanged, which makes the feature useful for safe pre-publication review during demonstrations.
 - Draft and closed surveys remain unavailable for public sharing because the public API does not accept responses for those states.
 
 ---

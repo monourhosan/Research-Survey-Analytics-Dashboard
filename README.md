@@ -68,6 +68,9 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
    - Download the complete or date-filtered response table as a standardized CSV file directly from the browser.
 8. **QR Survey Sharing**:
    - Open a Share dialog for active surveys with a locally generated, phone-scannable QR code, public URL, copy action, and PNG download.
+9. **Survey Preview Before Publishing**:
+   - Review the current builder state in a responsive respondent-style preview before publishing, including every question type, required indicators, consent text, and validation warnings.
+   - Preview mode is strictly non-submittable: it stores no changes and cannot create a public survey response.
 
 ---
 

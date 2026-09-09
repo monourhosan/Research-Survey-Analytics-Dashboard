@@ -80,6 +80,28 @@ function requireAuth(req, res, next) {
   next();
 }
 
+const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function normalizeResponseDeadline(value) {
+  if (value === undefined || value === null || value === '') return { value: null };
+  if (typeof value !== 'string' || !ISO_INSTANT_PATTERN.test(value.trim())) {
+    return { error: 'Response deadline must be a valid date and time with a timezone.' };
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { error: 'Response deadline must be a valid date and time.' };
+  }
+
+  return { value: parsed.toISOString() };
+}
+
+function isSurveyExpired(responseDeadline) {
+  if (!responseDeadline) return false;
+  const deadlineMs = Date.parse(responseDeadline);
+  return Number.isFinite(deadlineMs) && deadlineMs <= Date.now();
+}
+
 /* ==========================================================================
    1. AUTHENTICATION API
    ========================================================================== */
@@ -179,6 +201,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         s.title, 
         s.description, 
         s.status, 
+        s.response_deadline,
         s.created_at,
         COUNT(r.id) AS response_count
       FROM surveys s
@@ -217,6 +240,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
         s.title, 
         s.description, 
         s.status, 
+        s.response_deadline,
         s.created_at,
         s.updated_at,
         COUNT(r.id) AS response_count
@@ -238,7 +262,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
  */
 app.post('/api/surveys', requireAuth, async (req, res) => {
   try {
-    const { title, description, questions, status } = req.body;
+    const { title, description, questions, status, response_deadline } = req.body;
 
     if (!title || title.trim().length === 0) {
       return res.status(400).json({ error: 'Survey title is required' });
@@ -249,6 +273,14 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
     }
 
     const surveyStatus = status === 'active' ? 'active' : 'draft';
+    const normalizedDeadline = normalizeResponseDeadline(response_deadline);
+    if (normalizedDeadline.error) {
+      return res.status(400).json({ error: normalizedDeadline.error });
+    }
+
+    if (surveyStatus === 'active' && isSurveyExpired(normalizedDeadline.value)) {
+      return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
+    }
 
     // If attempting to publish directly, validate at least one question exists
     if (surveyStatus === 'active' && (!questions || questions.length === 0)) {
@@ -257,8 +289,8 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 
     // Insert survey
     const result = await dbRun(
-      'INSERT INTO surveys (title, description, status) VALUES (?, ?, ?)',
-      [title.trim(), description ? description.trim() : '', surveyStatus]
+      'INSERT INTO surveys (title, description, status, response_deadline) VALUES (?, ?, ?, ?)',
+      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value]
     );
 
     const surveyId = result.lastID;
@@ -364,9 +396,21 @@ app.put('/api/surveys/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Survey title cannot be empty' });
     }
 
+    const deadlineWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'response_deadline');
+    const normalizedDeadline = deadlineWasProvided
+      ? normalizeResponseDeadline(req.body.response_deadline)
+      : { value: existing.response_deadline };
+    if (normalizedDeadline.error) {
+      return res.status(400).json({ error: normalizedDeadline.error });
+    }
+
+    if (existing.status === 'active' && isSurveyExpired(normalizedDeadline.value)) {
+      return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
+    }
+
     await dbRun(
-      'UPDATE surveys SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [title.trim(), description ? description.trim() : '', surveyId]
+      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, surveyId]
     );
 
     // If questions array passed, sync questions
@@ -464,6 +508,10 @@ app.post('/api/surveys/:id/publish', requireAuth, async (req, res) => {
     const questions = await dbAll('SELECT id FROM questions WHERE survey_id = ?', [surveyId]);
     if (!questions || questions.length === 0) {
       return res.status(400).json({ error: 'Cannot publish survey: at least one question is required' });
+    }
+
+    if (isSurveyExpired(survey.response_deadline)) {
+      return res.status(400).json({ error: 'Cannot publish a survey with a response deadline in the past.' });
     }
 
     await dbRun(
@@ -571,7 +619,7 @@ app.delete('/api/questions/:id', requireAuth, async (req, res) => {
 app.get('/api/public/surveys/:id', async (req, res) => {
   try {
     const surveyId = parseInt(req.params.id, 10);
-    const survey = await dbGet('SELECT id, title, description, status FROM surveys WHERE id = ?', [surveyId]);
+    const survey = await dbGet('SELECT id, title, description, status, response_deadline FROM surveys WHERE id = ?', [surveyId]);
 
     if (!survey) {
       return res.status(404).json({ error: 'Survey not found' });
@@ -592,6 +640,17 @@ app.get('/api/public/surveys/:id', async (req, res) => {
       });
     }
 
+    if (isSurveyExpired(survey.response_deadline)) {
+      return res.status(403).json({
+        id: survey.id,
+        title: survey.title,
+        status: survey.status,
+        response_deadline: survey.response_deadline,
+        code: 'SURVEY_EXPIRED',
+        error: 'This survey response deadline has passed and it is no longer accepting responses.'
+      });
+    }
+
     const questions = await dbAll(
       `SELECT id, question_text, question_type, options_json, is_required, sort_order 
        FROM questions 
@@ -605,6 +664,7 @@ app.get('/api/public/surveys/:id', async (req, res) => {
       title: survey.title,
       description: survey.description,
       status: survey.status,
+      response_deadline: survey.response_deadline,
       questions: questions.map(q => ({
         id: q.id,
         question_text: q.question_text,
@@ -636,6 +696,13 @@ app.post('/api/public/surveys/:id/responses', async (req, res) => {
 
     if (survey.status !== 'active') {
       return res.status(403).json({ error: 'This survey is not currently accepting responses' });
+    }
+
+    if (isSurveyExpired(survey.response_deadline)) {
+      return res.status(403).json({
+        code: 'SURVEY_EXPIRED',
+        error: 'This survey response deadline has passed and it is no longer accepting responses.'
+      });
     }
 
     if (!answers || typeof answers !== 'object') {

@@ -206,10 +206,17 @@ async function initDatabase() {
           title TEXT NOT NULL,
           description TEXT,
           status TEXT DEFAULT 'draft',
+          response_deadline TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
       `);
+
+      // Backward-compatible migration for databases created before response deadlines.
+      const surveyColumns = await dbAll('PRAGMA table_info(surveys)');
+      if (!surveyColumns.some(column => column.name === 'response_deadline')) {
+        db.run('ALTER TABLE surveys ADD COLUMN response_deadline TEXT');
+      }
 
       db.run(`
         CREATE TABLE IF NOT EXISTS questions (

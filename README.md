@@ -66,6 +66,8 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
    - Labeled transparently: *"Rule-based automated summary generated from survey responses"*.
 7. **Native CSV Data Export**:
    - Download the complete or date-filtered response table as a standardized CSV file directly from the browser.
+8. **QR Survey Sharing**:
+   - Open a Share dialog for active surveys with a locally generated, phone-scannable QR code, public URL, copy action, and PNG download.
 
 ---
 

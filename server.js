@@ -123,6 +123,100 @@ function normalizeOneResponsePerBrowser(value) {
   return { error: 'Browser duplicate-response protection must be enabled or disabled.' };
 }
 
+const MAX_COLLECTION_NAME_LENGTH = 100;
+const MAX_COLLECTION_DESCRIPTION_LENGTH = 1000;
+const MAX_TEMPLATE_NAME_LENGTH = 120;
+const MAX_NOTE_LENGTH = 4000;
+const WORKSPACE_VIEW_TYPES = new Set(['workspace', 'analytics']);
+const VALID_QUESTION_TYPES = new Set(['text', 'multiple_choice', 'rating', 'yes_no']);
+
+function parsePositiveId(value) {
+  const id = Number.parseInt(value, 10);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function normalizeTargetResponses(value) {
+  if (value === undefined || value === null || value === '') return { value: null };
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > MAX_RESPONSE_LIMIT) {
+    return { error: `Target responses must be a whole number from 1 to ${MAX_RESPONSE_LIMIT.toLocaleString()}.` };
+  }
+  return { value };
+}
+
+function normalizeOptionalCollectionId(value) {
+  if (value === undefined || value === null || value === '') return { value: null };
+  const id = parsePositiveId(value);
+  return id ? { value: id } : { error: 'Collection must be a valid collection ID.' };
+}
+
+function normalizeName(value, maxLength, label) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) return { error: `${label} is required.` };
+  if (normalized.length > maxLength) return { error: `${label} must not exceed ${maxLength} characters.` };
+  return { value: normalized };
+}
+
+function safeJson(value, fallback = null) {
+  if (!value) return fallback;
+  try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+async function recordActivity(action, surveyId = null, details = null) {
+  const detailsJson = details ? JSON.stringify(details) : null;
+  await dbRun(
+    'INSERT INTO activity_logs (survey_id, action, details_json) VALUES (?, ?, ?)',
+    [surveyId, action, detailsJson]
+  );
+}
+
+async function assertCollectionExists(collectionId) {
+  if (!collectionId) return true;
+  const collection = await dbGet('SELECT id FROM collections WHERE id = ?', [collectionId]);
+  return Boolean(collection);
+}
+
+function computeReadiness(survey, questions) {
+  const checks = [];
+  const add = (key, label, passed, blocking = true, detail = '') => checks.push({ key, label, passed, blocking, detail });
+  add('title', 'Survey title', Boolean(survey.title && survey.title.trim()), true);
+  add('description', 'Research description', Boolean(survey.description && survey.description.trim()), false, 'Recommended for participants.');
+  add('questions', 'At least one question', questions.length > 0, true);
+  questions.forEach((question, index) => {
+    add(`question-${question.id || index}-text`, `Question ${index + 1} text`, Boolean(question.question_text && question.question_text.trim()), true);
+    add(`question-${question.id || index}-type`, `Question ${index + 1} type`, VALID_QUESTION_TYPES.has(question.question_type), true);
+    if (question.question_type === 'multiple_choice') {
+      const options = Array.isArray(question.options) ? question.options : safeJson(question.options_json, []);
+      const nonBlankOptions = options.filter(option => typeof option === 'string' && option.trim());
+      add(`question-${question.id || index}-options`, `Question ${index + 1} options`, nonBlankOptions.length >= 2 && nonBlankOptions.length <= 6 && nonBlankOptions.length === options.length, true);
+    }
+  });
+  const deadlineValid = !survey.response_deadline || Number.isFinite(Date.parse(survey.response_deadline));
+  add('deadline', 'Response deadline', deadlineValid, true);
+  const targetValid = survey.target_responses === null || survey.target_responses === undefined || (Number.isSafeInteger(survey.target_responses) && survey.target_responses > 0 && survey.target_responses <= MAX_RESPONSE_LIMIT);
+  add('target', 'Target responses', targetValid, true);
+  const limitValid = survey.response_limit === null || survey.response_limit === undefined || (Number.isSafeInteger(survey.response_limit) && survey.response_limit > 0 && survey.response_limit <= MAX_RESPONSE_LIMIT);
+  add('limit', 'Maximum responses', limitValid, true);
+  add('target-limit', 'Target fits maximum response limit', !survey.target_responses || !survey.response_limit || survey.target_responses <= survey.response_limit, true);
+  if (survey.status === 'active') add('future-deadline', 'Active deadline is in the future', !survey.response_deadline || !isSurveyExpired(survey.response_deadline), true);
+  const passed = checks.filter(check => check.passed).length;
+  const blocking = checks.filter(check => !check.passed && check.blocking);
+  return { percentage: Math.round((passed / Math.max(checks.length, 1)) * 100), checks, blocking, ready: blocking.length === 0 };
+}
+
+function calculateCollectionState(survey) {
+  const responses = Number(survey.response_count || 0);
+  const target = Number(survey.target_responses || 0);
+  const progress = target > 0 ? Math.min(100, Math.round((responses / target) * 100)) : null;
+  const deadlineMs = survey.response_deadline ? Date.parse(survey.response_deadline) : NaN;
+  const endingSoon = survey.status === 'active' && Number.isFinite(deadlineMs) && deadlineMs > Date.now() && deadlineMs - Date.now() <= 3 * 24 * 60 * 60 * 1000;
+  let label = survey.status === 'closed' ? 'Closed' : 'No responses yet';
+  if (survey.status === 'active' && responses > 0) label = 'Collecting';
+  if (survey.status === 'active' && target > 0 && responses >= target) label = 'Target reached';
+  else if (survey.status === 'active' && target > 0 && responses / target >= 0.8) label = 'Near target';
+  else if (endingSoon) label = 'Ending soon';
+  return { target_progress: progress, responses_remaining: target > 0 ? Math.max(0, target - responses) : null, collection_state: label, ending_soon: endingSoon };
+}
+
 async function getSurveyResponseCount(surveyId) {
   const row = await dbGet('SELECT COUNT(*) AS count FROM responses WHERE survey_id = ?', [surveyId]);
   return row ? row.count : 0;
@@ -281,6 +375,14 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
  */
 app.get('/api/surveys', requireAuth, async (req, res) => {
   try {
+    const archived = req.query.archived === 'true' ? 1 : 0;
+    const pinnedOnly = req.query.pinned === 'true';
+    const collectionId = req.query.collection_id ? parsePositiveId(req.query.collection_id) : null;
+    if (req.query.collection_id && !collectionId) return res.status(400).json({ error: 'Collection filter must be a valid ID.' });
+    const where = ['s.is_archived = ?'];
+    const params = [archived];
+    if (pinnedOnly) where.push('s.is_pinned = 1');
+    if (collectionId) { where.push('s.collection_id = ?'); params.push(collectionId); }
     const surveys = await dbAll(`
       SELECT 
         s.id, 
@@ -290,19 +392,425 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
         s.response_deadline,
         s.response_limit,
         s.one_response_per_browser,
+        s.collection_id,
+        s.is_archived,
+        s.is_pinned,
+        s.target_responses,
         s.created_at,
         s.updated_at,
+        c.name AS collection_name,
         COUNT(r.id) AS response_count
       FROM surveys s
+      LEFT JOIN collections c ON c.id = s.collection_id
       LEFT JOIN responses r ON s.id = r.survey_id
+      WHERE ${where.join(' AND ')}
       GROUP BY s.id
-      ORDER BY s.created_at DESC
-    `);
-    return res.json(surveys);
+      ORDER BY s.is_pinned DESC, s.updated_at DESC, s.created_at DESC
+    `, params);
+    return res.json(surveys.map(survey => ({ ...survey, ...calculateCollectionState(survey) })));
   } catch (err) {
     console.error('Surveys list error:', err);
     return res.status(500).json({ error: 'Failed to retrieve surveys' });
   }
+});
+
+/* ========================================================================
+   RESEARCH WORKSPACE API (admin only)
+   ======================================================================== */
+
+app.get('/api/workspace', requireAuth, async (req, res) => {
+  try {
+    const summary = await dbGet(`SELECT
+      COUNT(*) AS total_studies,
+      SUM(CASE WHEN is_archived = 0 AND status = 'active' THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN is_archived = 0 AND status = 'draft' THEN 1 ELSE 0 END) AS drafts,
+      SUM(CASE WHEN is_archived = 0 AND status = 'closed' THEN 1 ELSE 0 END) AS closed
+      FROM surveys`);
+    const responseTotal = await dbGet('SELECT COUNT(*) AS total_responses FROM responses');
+    const tracked = await dbAll(`SELECT s.*, COUNT(r.id) AS response_count
+      FROM surveys s LEFT JOIN responses r ON r.survey_id = s.id
+      WHERE s.is_archived = 0 GROUP BY s.id`);
+    const states = tracked.map(calculateCollectionState);
+    return res.json({
+      total_studies: summary.total_studies || 0,
+      active: summary.active || 0,
+      drafts: summary.drafts || 0,
+      closed: summary.closed || 0,
+      total_responses: responseTotal.total_responses || 0,
+      near_target: states.filter(item => item.collection_state === 'Near target').length,
+      ending_soon: states.filter(item => item.ending_soon).length
+    });
+  } catch (err) {
+    console.error('Workspace summary error:', err);
+    return res.status(500).json({ error: 'Failed to load workspace summary.' });
+  }
+});
+
+app.get('/api/collections', requireAuth, async (req, res) => {
+  try {
+    const collections = await dbAll(`SELECT c.*, COUNT(s.id) AS survey_count,
+      SUM(CASE WHEN s.status = 'active' AND s.is_archived = 0 THEN 1 ELSE 0 END) AS active_count,
+      SUM(CASE WHEN s.status = 'draft' AND s.is_archived = 0 THEN 1 ELSE 0 END) AS draft_count,
+      SUM(CASE WHEN s.status = 'closed' AND s.is_archived = 0 THEN 1 ELSE 0 END) AS closed_count,
+      COALESCE(SUM((SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id)), 0) AS total_responses,
+      MIN(CASE WHEN s.status = 'active' AND s.response_deadline IS NOT NULL AND datetime(s.response_deadline) > datetime('now') THEN s.response_deadline END) AS next_deadline
+      FROM collections c LEFT JOIN surveys s ON s.collection_id = c.id
+      GROUP BY c.id ORDER BY c.name COLLATE NOCASE ASC`);
+    const unassigned = await dbGet(`SELECT COUNT(*) AS survey_count, COALESCE(SUM((SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id)), 0) AS total_responses
+      FROM surveys s WHERE s.collection_id IS NULL AND s.is_archived = 0`);
+    return res.json({ collections, unassigned: unassigned || { survey_count: 0, total_responses: 0 } });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to load collections.' });
+  }
+});
+
+app.post('/api/collections', requireAuth, async (req, res) => {
+  try {
+    const name = normalizeName(req.body.name, MAX_COLLECTION_NAME_LENGTH, 'Collection name');
+    if (name.error) return res.status(400).json({ error: name.error });
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+    if (description.length > MAX_COLLECTION_DESCRIPTION_LENGTH) return res.status(400).json({ error: `Collection description must not exceed ${MAX_COLLECTION_DESCRIPTION_LENGTH} characters.` });
+    const result = await dbRun('INSERT INTO collections (name, description) VALUES (?, ?)', [name.value, description]);
+    const collection = await dbGet('SELECT * FROM collections WHERE id = ?', [result.lastID]);
+    await recordActivity('COLLECTION_CREATED', null, { collection_id: collection.id, name: collection.name });
+    return res.status(201).json(collection);
+  } catch (err) {
+    return res.status(400).json({ error: 'Collection name already exists or could not be created.' });
+  }
+});
+
+app.put('/api/collections/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Collection ID must be valid.' });
+    const existing = await dbGet('SELECT * FROM collections WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Collection not found.' });
+    const name = normalizeName(req.body.name, MAX_COLLECTION_NAME_LENGTH, 'Collection name');
+    if (name.error) return res.status(400).json({ error: name.error });
+    const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
+    if (description.length > MAX_COLLECTION_DESCRIPTION_LENGTH) return res.status(400).json({ error: `Collection description must not exceed ${MAX_COLLECTION_DESCRIPTION_LENGTH} characters.` });
+    await dbRun('UPDATE collections SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name.value, description, id]);
+    const collection = await dbGet('SELECT * FROM collections WHERE id = ?', [id]);
+    await recordActivity('COLLECTION_UPDATED', null, { collection_id: id, name: collection.name });
+    return res.json(collection);
+  } catch (_) { return res.status(400).json({ error: 'Collection could not be updated. Names must be unique.' }); }
+});
+
+app.delete('/api/collections/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const collection = id && await dbGet('SELECT * FROM collections WHERE id = ?', [id]);
+    if (!collection) return res.status(404).json({ error: 'Collection not found.' });
+    await dbRun('UPDATE surveys SET collection_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE collection_id = ?', [id]);
+    await dbRun('DELETE FROM collections WHERE id = ?', [id]);
+    await recordActivity('COLLECTION_DELETED', null, { collection_id: id, name: collection.name });
+    return res.json({ success: true, message: 'Collection deleted; its surveys are now unassigned.' });
+  } catch (_) { return res.status(500).json({ error: 'Failed to delete collection.' }); }
+});
+
+app.get('/api/surveys/:id/readiness', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const survey = id && await dbGet('SELECT * FROM surveys WHERE id = ?', [id]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    const questions = await dbAll('SELECT * FROM questions WHERE survey_id = ? ORDER BY sort_order, id', [id]);
+    return res.json(computeReadiness(survey, questions));
+  } catch (_) { return res.status(500).json({ error: 'Failed to calculate survey readiness.' }); }
+});
+
+app.post('/api/surveys/:id/duplicate', requireAuth, async (req, res) => {
+  const sourceId = parsePositiveId(req.params.id);
+  try {
+    const source = sourceId && await dbGet('SELECT * FROM surveys WHERE id = ?', [sourceId]);
+    if (!source) return res.status(404).json({ error: 'Survey not found.' });
+    const questions = await dbAll('SELECT * FROM questions WHERE survey_id = ? ORDER BY sort_order, id', [sourceId]);
+    const copyTitle = typeof req.body.title === 'string' && req.body.title.trim() ? req.body.title.trim() : `Copy of ${source.title}`;
+    if (copyTitle.length > 255) return res.status(400).json({ error: 'Survey title must not exceed 255 characters.' });
+    const deadline = source.response_deadline && !isSurveyExpired(source.response_deadline) ? source.response_deadline : null;
+    await dbRun('BEGIN TRANSACTION');
+    try {
+      const created = await dbRun(`INSERT INTO surveys (title, description, status, response_deadline, response_limit, one_response_per_browser, collection_id, is_archived, is_pinned, target_responses)
+        VALUES (?, ?, 'draft', ?, ?, ?, ?, 0, 0, ?)`, [copyTitle, source.description || '', deadline, source.response_limit || null, source.one_response_per_browser || 0, source.collection_id || null, source.target_responses || null]);
+      for (const question of questions) await dbRun(`INSERT INTO questions (survey_id, question_text, question_type, options_json, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?)`, [created.lastID, question.question_text, question.question_type, question.options_json, question.is_required, question.sort_order]);
+      await dbRun('COMMIT');
+      await recordActivity('SURVEY_DUPLICATED', created.lastID, { source_survey_id: sourceId });
+      return res.status(201).json({ id: created.lastID, title: copyTitle, status: 'draft' });
+    } catch (err) { await dbRun('ROLLBACK'); throw err; }
+  } catch (err) { return res.status(500).json({ error: 'Failed to duplicate survey.' }); }
+});
+
+function templatePayloadFromSurvey(survey, questions) {
+  return {
+    description: survey.description || '',
+    response_limit: survey.response_limit || null,
+    target_responses: survey.target_responses || null,
+    one_response_per_browser: Boolean(survey.one_response_per_browser),
+    questions: questions.map(question => ({
+      question_text: question.question_text,
+      question_type: question.question_type,
+      options: safeJson(question.options_json, []),
+      is_required: Boolean(question.is_required),
+      sort_order: question.sort_order
+    }))
+  };
+}
+
+app.get('/api/templates', requireAuth, async (_req, res) => {
+  try { return res.json(await dbAll('SELECT id, name, description, created_at, updated_at FROM survey_templates ORDER BY updated_at DESC, id DESC')); }
+  catch (_) { return res.status(500).json({ error: 'Failed to load templates.' }); }
+});
+
+app.post('/api/surveys/:id/templates', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const survey = id && await dbGet('SELECT * FROM surveys WHERE id = ?', [id]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    const name = normalizeName(req.body.name || `${survey.title} Template`, MAX_TEMPLATE_NAME_LENGTH, 'Template name');
+    if (name.error) return res.status(400).json({ error: name.error });
+    const questions = await dbAll('SELECT * FROM questions WHERE survey_id = ? ORDER BY sort_order, id', [id]);
+    const result = await dbRun('INSERT INTO survey_templates (name, description, template_json) VALUES (?, ?, ?)', [name.value, typeof req.body.description === 'string' ? req.body.description.trim() : '', JSON.stringify(templatePayloadFromSurvey(survey, questions))]);
+    const template = await dbGet('SELECT id, name, description, created_at, updated_at FROM survey_templates WHERE id = ?', [result.lastID]);
+    await recordActivity('TEMPLATE_CREATED', id, { template_id: template.id, name: template.name });
+    return res.status(201).json(template);
+  } catch (_) { return res.status(500).json({ error: 'Failed to save survey as a template.' }); }
+});
+
+app.post('/api/templates/:id/create-survey', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const template = id && await dbGet('SELECT * FROM survey_templates WHERE id = ?', [id]);
+    if (!template) return res.status(404).json({ error: 'Template not found.' });
+    const payload = safeJson(template.template_json, null);
+    if (!payload || !Array.isArray(payload.questions)) return res.status(400).json({ error: 'Template data is invalid.' });
+    const title = normalizeName(req.body.title || `New ${template.name}`, 255, 'Survey title');
+    if (title.error) return res.status(400).json({ error: title.error });
+    await dbRun('BEGIN TRANSACTION');
+    try {
+      const created = await dbRun(`INSERT INTO surveys (title, description, status, response_limit, target_responses, one_response_per_browser, is_archived, is_pinned)
+        VALUES (?, ?, 'draft', ?, ?, ?, 0, 0)`, [title.value, payload.description || '', payload.response_limit || null, payload.target_responses || null, payload.one_response_per_browser ? 1 : 0]);
+      for (let index = 0; index < payload.questions.length; index += 1) {
+        const q = payload.questions[index];
+        if (!VALID_QUESTION_TYPES.has(q.question_type) || !String(q.question_text || '').trim()) continue;
+        const options = q.question_type === 'multiple_choice' ? JSON.stringify(Array.isArray(q.options) ? q.options : []) : null;
+        await dbRun('INSERT INTO questions (survey_id, question_text, question_type, options_json, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?)', [created.lastID, String(q.question_text).trim(), q.question_type, options, q.is_required ? 1 : 0, Number.isSafeInteger(q.sort_order) ? q.sort_order : index]);
+      }
+      await dbRun('COMMIT');
+      await recordActivity('SURVEY_CREATED', created.lastID, { template_id: id, source: 'template' });
+      return res.status(201).json({ id: created.lastID, title: title.value, status: 'draft' });
+    } catch (err) { await dbRun('ROLLBACK'); throw err; }
+  } catch (_) { return res.status(500).json({ error: 'Failed to create survey from template.' }); }
+});
+
+app.put('/api/templates/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const template = id && await dbGet('SELECT id, name, description FROM survey_templates WHERE id = ?', [id]);
+    if (!template) return res.status(404).json({ error: 'Template not found.' });
+    const name = normalizeName(req.body.name, MAX_TEMPLATE_NAME_LENGTH, 'Template name');
+    if (name.error) return res.status(400).json({ error: name.error });
+    const description = typeof req.body.description === 'string' ? req.body.description.trim().slice(0, 1000) : template.description;
+    await dbRun('UPDATE survey_templates SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name.value, description, id]);
+    const updated = await dbGet('SELECT id, name, description, created_at, updated_at FROM survey_templates WHERE id = ?', [id]);
+    await recordActivity('TEMPLATE_UPDATED', null, { template_id: id, name: updated.name });
+    return res.json(updated);
+  } catch (_) { return res.status(500).json({ error: 'Failed to update template.' }); }
+});
+
+app.delete('/api/templates/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const template = id && await dbGet('SELECT id, name FROM survey_templates WHERE id = ?', [id]);
+    if (!template) return res.status(404).json({ error: 'Template not found.' });
+    await dbRun('DELETE FROM survey_templates WHERE id = ?', [id]);
+    await recordActivity('TEMPLATE_DELETED', null, { template_id: id, name: template.name });
+    return res.json({ success: true });
+  } catch (_) { return res.status(500).json({ error: 'Failed to delete template.' }); }
+});
+
+app.post('/api/surveys/:id/archive', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const survey = id && await dbGet('SELECT * FROM surveys WHERE id = ?', [id]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    if (survey.status === 'active') return res.status(400).json({ error: 'Close an active survey before archiving it.' });
+    await dbRun('UPDATE surveys SET is_archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+    await recordActivity('SURVEY_ARCHIVED', id);
+    return res.json({ success: true, is_archived: 1 });
+  } catch (_) { return res.status(500).json({ error: 'Failed to archive survey.' }); }
+});
+
+app.post('/api/surveys/:id/restore', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const survey = id && await dbGet('SELECT id FROM surveys WHERE id = ?', [id]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    await dbRun('UPDATE surveys SET is_archived = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+    await recordActivity('SURVEY_RESTORED', id);
+    return res.json({ success: true, is_archived: 0 });
+  } catch (_) { return res.status(500).json({ error: 'Failed to restore survey.' }); }
+});
+
+app.post('/api/surveys/:id/pin', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id); const survey = id && await dbGet('SELECT id, is_pinned FROM surveys WHERE id = ?', [id]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    const pinned = req.body && req.body.pinned === false ? 0 : 1;
+    await dbRun('UPDATE surveys SET is_pinned = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pinned, id]);
+    await recordActivity(pinned ? 'SURVEY_PINNED' : 'SURVEY_UNPINNED', id);
+    return res.json({ success: true, is_pinned: pinned });
+  } catch (_) { return res.status(500).json({ error: 'Failed to update survey pin.' }); }
+});
+
+app.get('/api/surveys/:id/notes', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id);
+    const survey = id && await dbGet('SELECT id FROM surveys WHERE id = ?', [id]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    return res.json(await dbAll('SELECT * FROM survey_notes WHERE survey_id = ? ORDER BY created_at DESC, id DESC', [id]));
+  } catch (_) { return res.status(500).json({ error: 'Failed to load research notes.' }); }
+});
+
+app.post('/api/surveys/:id/notes', requireAuth, async (req, res) => {
+  try {
+    const surveyId = parsePositiveId(req.params.id);
+    const survey = surveyId && await dbGet('SELECT id FROM surveys WHERE id = ?', [surveyId]);
+    if (!survey) return res.status(404).json({ error: 'Survey not found.' });
+    const note = normalizeName(req.body.note_text, MAX_NOTE_LENGTH, 'Research note');
+    if (note.error) return res.status(400).json({ error: note.error });
+    const result = await dbRun('INSERT INTO survey_notes (survey_id, note_text) VALUES (?, ?)', [surveyId, note.value]);
+    const created = await dbGet('SELECT * FROM survey_notes WHERE id = ?', [result.lastID]);
+    await recordActivity('NOTE_CREATED', surveyId, { note_id: created.id });
+    return res.status(201).json(created);
+  } catch (_) { return res.status(500).json({ error: 'Failed to create research note.' }); }
+});
+
+app.put('/api/notes/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id); const note = id && await dbGet('SELECT * FROM survey_notes WHERE id = ?', [id]);
+    if (!note) return res.status(404).json({ error: 'Research note not found.' });
+    const text = normalizeName(req.body.note_text, MAX_NOTE_LENGTH, 'Research note');
+    if (text.error) return res.status(400).json({ error: text.error });
+    await dbRun('UPDATE survey_notes SET note_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [text.value, id]);
+    const updated = await dbGet('SELECT * FROM survey_notes WHERE id = ?', [id]);
+    await recordActivity('NOTE_UPDATED', note.survey_id, { note_id: id });
+    return res.json(updated);
+  } catch (_) { return res.status(500).json({ error: 'Failed to update research note.' }); }
+});
+
+app.delete('/api/notes/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id); const note = id && await dbGet('SELECT * FROM survey_notes WHERE id = ?', [id]);
+    if (!note) return res.status(404).json({ error: 'Research note not found.' });
+    await dbRun('DELETE FROM survey_notes WHERE id = ?', [id]);
+    await recordActivity('NOTE_DELETED', note.survey_id, { note_id: id });
+    return res.json({ success: true });
+  } catch (_) { return res.status(500).json({ error: 'Failed to delete research note.' }); }
+});
+
+app.get('/api/activity', requireAuth, async (req, res) => {
+  try {
+    const requested = req.query.limit ? Number.parseInt(req.query.limit, 10) : 20;
+    const limit = Number.isSafeInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 20;
+    const rows = await dbAll(`SELECT a.*, s.title AS survey_title FROM activity_logs a LEFT JOIN surveys s ON s.id = a.survey_id
+      ORDER BY a.created_at DESC, a.id DESC LIMIT ?`, [limit]);
+    return res.json(rows.map(row => ({ ...row, details: safeJson(row.details_json, null) })));
+  } catch (_) { return res.status(500).json({ error: 'Failed to load activity history.' }); }
+});
+
+function validateSavedViewPayload(viewType, surveyId, filters) {
+  if (!WORKSPACE_VIEW_TYPES.has(viewType) || !filters || typeof filters !== 'object' || Array.isArray(filters)) return { error: 'Saved view type or filters are invalid.' };
+  if (viewType === 'workspace') {
+    const allowed = new Set(['status', 'collection_id', 'archived', 'pinned', 'search', 'sort']);
+    if (Object.keys(filters).some(key => !allowed.has(key))) return { error: 'Workspace view contains unsupported filters.' };
+    if (filters.status && !['all', 'draft', 'active', 'closed'].includes(filters.status)) return { error: 'Workspace status filter is invalid.' };
+    if (filters.collection_id && !parsePositiveId(filters.collection_id)) return { error: 'Workspace collection filter is invalid.' };
+  }
+  if (viewType === 'analytics') {
+    if (!surveyId) return { error: 'Analytics saved views require a survey.' };
+    const filter = parseDateFilters({ from: filters.from, to: filters.to });
+    if (filter.error) return { error: filter.error };
+  }
+  return { value: filters };
+}
+
+app.get('/api/saved-views', requireAuth, async (req, res) => {
+  try {
+    const type = req.query.view_type;
+    if (type && !WORKSPACE_VIEW_TYPES.has(type)) return res.status(400).json({ error: 'Saved view type is invalid.' });
+    const surveyId = req.query.survey_id ? parsePositiveId(req.query.survey_id) : null;
+    const where = []; const params = [];
+    if (type) { where.push('view_type = ?'); params.push(type); }
+    if (surveyId) { where.push('survey_id = ?'); params.push(surveyId); }
+    const rows = await dbAll(`SELECT * FROM saved_views ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY updated_at DESC, id DESC`, params);
+    return res.json(rows.map(row => ({ ...row, filters: safeJson(row.filters_json, {}) })));
+  } catch (_) { return res.status(500).json({ error: 'Failed to load saved views.' }); }
+});
+
+app.post('/api/saved-views', requireAuth, async (req, res) => {
+  try {
+    const name = normalizeName(req.body.name, 100, 'Saved view name');
+    if (name.error) return res.status(400).json({ error: name.error });
+    const type = req.body.view_type;
+    const surveyId = req.body.survey_id === undefined || req.body.survey_id === null ? null : parsePositiveId(req.body.survey_id);
+    const validation = validateSavedViewPayload(type, surveyId, req.body.filters);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    if (surveyId && !await dbGet('SELECT id FROM surveys WHERE id = ?', [surveyId])) return res.status(404).json({ error: 'Survey not found.' });
+    const result = await dbRun('INSERT INTO saved_views (name, view_type, survey_id, filters_json) VALUES (?, ?, ?, ?)', [name.value, type, surveyId, JSON.stringify(validation.value)]);
+    const saved = await dbGet('SELECT * FROM saved_views WHERE id = ?', [result.lastID]);
+    return res.status(201).json({ ...saved, filters: safeJson(saved.filters_json, {}) });
+  } catch (_) { return res.status(500).json({ error: 'Failed to save view.' }); }
+});
+
+app.put('/api/saved-views/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parsePositiveId(req.params.id); const existing = id && await dbGet('SELECT * FROM saved_views WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Saved view not found.' });
+    const name = normalizeName(req.body.name === undefined ? existing.name : req.body.name, 100, 'Saved view name');
+    if (name.error) return res.status(400).json({ error: name.error });
+    const filters = req.body.filters === undefined ? safeJson(existing.filters_json, {}) : req.body.filters;
+    const validation = validateSavedViewPayload(existing.view_type, existing.survey_id, filters);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    await dbRun('UPDATE saved_views SET name = ?, filters_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name.value, JSON.stringify(filters), id]);
+    const saved = await dbGet('SELECT * FROM saved_views WHERE id = ?', [id]);
+    return res.json({ ...saved, filters: safeJson(saved.filters_json, {}) });
+  } catch (_) { return res.status(500).json({ error: 'Failed to update saved view.' }); }
+});
+
+app.delete('/api/saved-views/:id', requireAuth, async (req, res) => {
+  try { const id = parsePositiveId(req.params.id); const result = id && await dbRun('DELETE FROM saved_views WHERE id = ?', [id]); if (!result || !result.changes) return res.status(404).json({ error: 'Saved view not found.' }); return res.json({ success: true }); }
+  catch (_) { return res.status(500).json({ error: 'Failed to delete saved view.' }); }
+});
+
+app.get('/api/surveys/compare', requireAuth, async (req, res) => {
+  try {
+    const rawIds = String(req.query.ids || '').split(',').filter(Boolean);
+    const ids = [...new Set(rawIds.map(parsePositiveId).filter(Boolean))];
+    if (ids.length < 2 || ids.length > 4) return res.status(400).json({ error: 'Select between 2 and 4 valid surveys to compare.' });
+    const placeholders = ids.map(() => '?').join(',');
+    const surveys = await dbAll(`SELECT s.*, c.name AS collection_name, COUNT(r.id) AS response_count,
+      MIN(r.submitted_at) AS first_response, MAX(r.submitted_at) AS latest_response
+      FROM surveys s LEFT JOIN collections c ON c.id = s.collection_id LEFT JOIN responses r ON r.survey_id = s.id
+      WHERE s.id IN (${placeholders}) GROUP BY s.id`, ids);
+    if (surveys.length !== ids.length) return res.status(404).json({ error: 'One or more surveys were not found.' });
+    const comparisons = [];
+    for (const survey of surveys) {
+      const rating = await dbGet(`SELECT AVG(CAST(a.answer_text AS REAL)) AS average_rating,
+        SUM(CASE WHEN CAST(a.answer_text AS REAL) >= 4 THEN 1 ELSE 0 END) AS positive_count,
+        COUNT(a.id) AS rating_count
+        FROM answers a JOIN questions q ON q.id = a.question_id WHERE q.survey_id = ? AND q.question_type = 'rating'`, [survey.id]);
+      const weekly = await dbGet(`SELECT COUNT(*) AS count FROM responses WHERE survey_id = ? AND datetime(submitted_at) >= datetime('now', '-7 days')`, [survey.id]);
+      comparisons.push({
+        id: survey.id, title: survey.title, status: survey.status, is_archived: Boolean(survey.is_archived), collection_name: survey.collection_name || null,
+        response_count: survey.response_count, target_responses: survey.target_responses || null,
+        deadline: survey.response_deadline || null, first_response: survey.first_response || null, latest_response: survey.latest_response || null,
+        average_rating: rating && rating.rating_count ? Number(Number(rating.average_rating).toFixed(2)) : null,
+        positive_rating_percentage: rating && rating.rating_count ? Math.round((rating.positive_count / rating.rating_count) * 100) : null,
+        latest_7_day_responses: weekly ? weekly.count : 0,
+        ...calculateCollectionState(survey)
+      });
+    }
+    return res.json({ surveys: ids.map(id => comparisons.find(survey => survey.id === id)) });
+  } catch (err) { console.error('Comparison error:', err); return res.status(500).json({ error: 'Failed to compare surveys.' }); }
 });
 
 /**
@@ -311,7 +819,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
  */
 app.post('/api/surveys', requireAuth, async (req, res) => {
   try {
-    const { title, description, questions, status, response_deadline, response_limit, one_response_per_browser } = req.body;
+    const { title, description, questions, status, response_deadline, response_limit, one_response_per_browser, target_responses, collection_id } = req.body;
 
     if (!title || title.trim().length === 0) {
       return res.status(400).json({ error: 'Survey title is required' });
@@ -334,6 +842,14 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
     if (normalizedBrowserProtection.error) {
       return res.status(400).json({ error: normalizedBrowserProtection.error });
     }
+    const normalizedTarget = normalizeTargetResponses(target_responses);
+    if (normalizedTarget.error) return res.status(400).json({ error: normalizedTarget.error });
+    if (normalizedTarget.value && normalizedLimit.value && normalizedTarget.value > normalizedLimit.value) {
+      return res.status(400).json({ error: 'Target responses cannot exceed the maximum response limit.' });
+    }
+    const normalizedCollection = normalizeOptionalCollectionId(collection_id);
+    if (normalizedCollection.error) return res.status(400).json({ error: normalizedCollection.error });
+    if (!await assertCollectionExists(normalizedCollection.value)) return res.status(400).json({ error: 'Collection not found.' });
 
     if (surveyStatus === 'active' && isSurveyExpired(normalizedDeadline.value)) {
       return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
@@ -346,8 +862,8 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 
     // Insert survey
     const result = await dbRun(
-      'INSERT INTO surveys (title, description, status, response_deadline, response_limit, one_response_per_browser) VALUES (?, ?, ?, ?, ?, ?)',
-      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value]
+      'INSERT INTO surveys (title, description, status, response_deadline, response_limit, one_response_per_browser, target_responses, collection_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value, normalizedTarget.value, normalizedCollection.value]
     );
 
     const surveyId = result.lastID;
@@ -387,6 +903,7 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 
     const createdSurvey = await dbGet('SELECT * FROM surveys WHERE id = ?', [surveyId]);
     const createdQuestions = await dbAll('SELECT * FROM questions WHERE survey_id = ? ORDER BY sort_order ASC, id ASC', [surveyId]);
+    await recordActivity('SURVEY_CREATED', surveyId, { collection_id: normalizedCollection.value, status: surveyStatus });
 
     return res.status(201).json({
       ...createdSurvey,
@@ -405,7 +922,7 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 app.get('/api/surveys/:id', requireAuth, async (req, res) => {
   try {
     const surveyId = parseInt(req.params.id, 10);
-    const survey = await dbGet('SELECT * FROM surveys WHERE id = ?', [surveyId]);
+    const survey = await dbGet('SELECT s.*, c.name AS collection_name FROM surveys s LEFT JOIN collections c ON c.id = s.collection_id WHERE s.id = ?', [surveyId]);
 
     if (!survey) {
       return res.status(404).json({ error: 'Survey not found' });
@@ -424,6 +941,7 @@ app.get('/api/surveys/:id', requireAuth, async (req, res) => {
     return res.json({
       ...survey,
       response_count: responseCountRow ? responseCountRow.count : 0,
+      ...calculateCollectionState({ ...survey, response_count: responseCountRow ? responseCountRow.count : 0 }),
       questions: questions.map(q => ({
         ...q,
         options: q.options_json ? JSON.parse(q.options_json) : []
@@ -441,8 +959,10 @@ app.get('/api/surveys/:id', requireAuth, async (req, res) => {
  */
 app.put('/api/surveys/:id', requireAuth, async (req, res) => {
   try {
-    const surveyId = parseInt(req.params.id, 10);
+    const surveyId = parsePositiveId(req.params.id);
     const { title, description, questions } = req.body;
+
+    if (!surveyId) return res.status(400).json({ error: 'Survey ID must be valid.' });
 
     const existing = await dbGet('SELECT * FROM surveys WHERE id = ?', [surveyId]);
     if (!existing) {
@@ -474,15 +994,39 @@ app.put('/api/surveys/:id', requireAuth, async (req, res) => {
     if (normalizedBrowserProtection.error) {
       return res.status(400).json({ error: normalizedBrowserProtection.error });
     }
+    const targetWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'target_responses');
+    const normalizedTarget = targetWasProvided ? normalizeTargetResponses(req.body.target_responses) : { value: existing.target_responses };
+    if (normalizedTarget.error) return res.status(400).json({ error: normalizedTarget.error });
+    if (normalizedTarget.value && normalizedLimit.value && normalizedTarget.value > normalizedLimit.value) {
+      return res.status(400).json({ error: 'Target responses cannot exceed the maximum response limit.' });
+    }
+    const collectionWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'collection_id');
+    const normalizedCollection = collectionWasProvided ? normalizeOptionalCollectionId(req.body.collection_id) : { value: existing.collection_id };
+    if (normalizedCollection.error) return res.status(400).json({ error: normalizedCollection.error });
+    if (!await assertCollectionExists(normalizedCollection.value)) return res.status(400).json({ error: 'Collection not found.' });
 
     if (existing.status === 'active' && isSurveyExpired(normalizedDeadline.value)) {
       return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
     }
 
     await dbRun(
-      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, response_limit = ?, one_response_per_browser = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value, surveyId]
+      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, response_limit = ?, one_response_per_browser = ?, target_responses = ?, collection_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value, normalizedTarget.value, normalizedCollection.value, surveyId]
     );
+    await recordActivity('SURVEY_UPDATED', surveyId, {
+      old_deadline: existing.response_deadline || null,
+      new_deadline: normalizedDeadline.value || null,
+      old_target: existing.target_responses || null,
+      new_target: normalizedTarget.value || null,
+      old_collection_id: existing.collection_id || null,
+      new_collection_id: normalizedCollection.value || null
+    });
+    if (targetWasProvided && Number(existing.target_responses || 0) !== Number(normalizedTarget.value || 0)) {
+      await recordActivity('TARGET_UPDATED', surveyId, { old_target: existing.target_responses || null, new_target: normalizedTarget.value || null });
+    }
+    if (collectionWasProvided && Number(existing.collection_id || 0) !== Number(normalizedCollection.value || 0)) {
+      await recordActivity('SURVEY_MOVED_COLLECTION', surveyId, { old_collection_id: existing.collection_id || null, new_collection_id: normalizedCollection.value || null });
+    }
 
     // If questions array passed, sync questions
     if (Array.isArray(questions)) {
@@ -589,6 +1133,7 @@ app.post('/api/surveys/:id/publish', requireAuth, async (req, res) => {
       "UPDATE surveys SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [surveyId]
     );
+    await recordActivity('SURVEY_PUBLISHED', surveyId);
 
     return res.json({ success: true, message: 'Survey published successfully', status: 'active' });
   } catch (err) {
@@ -614,6 +1159,7 @@ app.post('/api/surveys/:id/close', requireAuth, async (req, res) => {
       "UPDATE surveys SET status = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [surveyId]
     );
+    await recordActivity('SURVEY_CLOSED', surveyId);
 
     return res.json({ success: true, message: 'Survey closed successfully', status: 'closed' });
   } catch (err) {

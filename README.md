@@ -87,6 +87,18 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
    - Administrators may enable a whole-number maximum response count from 1 to 1,000,000, or leave the survey unlimited.
    - The public API includes current capacity for available surveys and returns `SURVEY_RESPONSE_LIMIT_REACHED` after the limit is reached.
    - Admission, response creation, and answer storage run in a SQLite transaction serialized by the current Node.js process; existing data is never deleted if an administrator lowers a limit below the stored response count.
+13. **Browser Duplicate Response Protection**:
+   - Administrators can optionally limit repeat submissions from the same browser for an individual survey.
+   - After a successful server-accepted response, the browser stores only a survey-scoped completion marker with a version and timestamp—never answers, identity data, or a browser fingerprint.
+   - This is best-effort protection: another browser/device or cleared browser storage can submit again, and disabled surveys do not enforce an existing marker.
+14. **Research Workspace Expansion**:
+   - Organize studies into named collections without moving or deleting their responses.
+   - Pin important studies, archive safe Draft/Closed studies, restore archived work, and review an administrator-only activity trail.
+   - Set an optional target sample size separate from the maximum accepted-response limit; the workspace shows real target progress and remaining responses.
+   - Duplicate an editable Draft survey, save an existing survey as a reusable template, and create a fresh Draft survey from a template without copying participant data.
+   - Add private research notes that never appear in public survey routes or CSV exports.
+   - Save validated workspace filters and analytics date ranges, and compare 2–4 real surveys using response, target, rating, deadline, and recent-collection metrics.
+   - Review a deterministic Draft readiness checklist before publishing; this supplements rather than replaces server-side validation.
 
 ---
 

@@ -225,6 +225,80 @@ async function initDatabase() {
       if (!surveyColumns.some(column => column.name === 'one_response_per_browser')) {
         db.run('ALTER TABLE surveys ADD COLUMN one_response_per_browser INTEGER NOT NULL DEFAULT 0');
       }
+      if (!surveyColumns.some(column => column.name === 'collection_id')) {
+        db.run('ALTER TABLE surveys ADD COLUMN collection_id INTEGER');
+      }
+      if (!surveyColumns.some(column => column.name === 'is_archived')) {
+        db.run('ALTER TABLE surveys ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!surveyColumns.some(column => column.name === 'is_pinned')) {
+        db.run('ALTER TABLE surveys ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!surveyColumns.some(column => column.name === 'target_responses')) {
+        db.run('ALTER TABLE surveys ADD COLUMN target_responses INTEGER');
+      }
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS collections (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT DEFAULT '',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS survey_templates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          description TEXT DEFAULT '',
+          template_json TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS survey_notes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          survey_id INTEGER NOT NULL,
+          note_text TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE
+        );
+      `);
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS activity_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          survey_id INTEGER,
+          action TEXT NOT NULL,
+          details_json TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE SET NULL
+        );
+      `);
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS saved_views (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          view_type TEXT NOT NULL,
+          survey_id INTEGER,
+          filters_json TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE
+        );
+      `);
+
+      db.run('CREATE INDEX IF NOT EXISTS idx_surveys_collection ON surveys(collection_id)');
+      db.run('CREATE INDEX IF NOT EXISTS idx_surveys_workspace ON surveys(is_archived, is_pinned, status)');
+      db.run('CREATE INDEX IF NOT EXISTS idx_notes_survey ON survey_notes(survey_id, created_at DESC)');
+      db.run('CREATE INDEX IF NOT EXISTS idx_activity_survey ON activity_logs(survey_id, created_at DESC)');
+      db.run('CREATE INDEX IF NOT EXISTS idx_saved_views_type ON saved_views(view_type, survey_id)');
 
       db.run(`
         CREATE TABLE IF NOT EXISTS questions (

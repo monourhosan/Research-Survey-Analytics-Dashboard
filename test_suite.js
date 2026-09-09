@@ -325,6 +325,7 @@ async function runTests() {
       status: 'draft',
       response_deadline: limitDeadline,
       response_limit: 2,
+      one_response_per_browser: true,
       questions: [{
         question_text: 'Is the response limit working?',
         question_type: 'yes_no',
@@ -333,8 +334,8 @@ async function runTests() {
       }]
     }, sessionCookie);
     assert(
-      limitedSurvey.status === 201 && limitedSurvey.body.response_limit === 2,
-      'TEST 16h: Response limit persists alongside a future deadline'
+      limitedSurvey.status === 201 && limitedSurvey.body.response_limit === 2 && limitedSurvey.body.one_response_per_browser === 1,
+      'TEST 16h: Response limit and same-browser protection persist alongside a future deadline'
     );
 
     const limitedSurveyId = limitedSurvey.body.id;
@@ -359,8 +360,8 @@ async function runTests() {
     const limitedQuestion = limitedPublic.body.questions && limitedPublic.body.questions[0];
     assert(
       publishLimitedSurvey.status === 200 && limitedPublic.status === 200 &&
-      limitedPublic.body.response_limit === 2 && limitedPublic.body.response_count === 0,
-      'TEST 16j: Public API exposes an available configured response limit'
+      limitedPublic.body.response_limit === 2 && limitedPublic.body.response_count === 0 && limitedPublic.body.one_response_per_browser === true,
+      'TEST 16j: Public API exposes configured response capacity and browser protection'
     );
 
     const firstLimitedResponse = await request('POST', `/api/public/surveys/${limitedSurveyId}/responses`, {
@@ -403,6 +404,117 @@ async function runTests() {
       publicSurvey.body.response_limit === null,
       'TEST 16n: Surveys without a response limit remain unlimited'
     );
+
+    const browserProtectionDefault = await request('POST', '/api/surveys', {
+      title: 'Browser Protection Default Test Survey',
+      description: 'Verifies the privacy-conscious setting is optional.',
+      status: 'draft',
+      questions: []
+    }, sessionCookie);
+    const browserProtectionId = browserProtectionDefault.body.id;
+    const enableBrowserProtection = await request('PUT', `/api/surveys/${browserProtectionId}`, {
+      title: 'Browser Protection Default Test Survey',
+      description: 'Verifies the privacy-conscious setting is optional.',
+      one_response_per_browser: true
+    }, sessionCookie);
+    const browserProtectionDetails = await request('GET', `/api/surveys/${browserProtectionId}`, null, sessionCookie);
+    const invalidBrowserProtection = await request('POST', '/api/surveys', {
+      title: 'Invalid Browser Protection Test Survey',
+      status: 'draft',
+      one_response_per_browser: 'yes',
+      questions: []
+    }, sessionCookie);
+    assert(
+      browserProtectionDefault.status === 201 && browserProtectionDefault.body.one_response_per_browser === 0 &&
+      enableBrowserProtection.status === 200 && browserProtectionDetails.body.one_response_per_browser === 1 &&
+      invalidBrowserProtection.status === 400,
+      'TEST 16o: Browser duplicate-response protection defaults off, can be updated, and validates its setting'
+    );
+
+    // TEST 21: Research Workspace extensions are authenticated, data-preserving, and reusable.
+    const unauthorizedCollections = await request('GET', '/api/collections');
+    assert(unauthorizedCollections.status === 401, 'TEST 21a: Workspace collection APIs reject unauthenticated access');
+
+    const workspaceCollection = await request('POST', '/api/collections', {
+      name: `CSE499 Workspace ${Date.now()}`,
+      description: 'Automated workspace verification collection.'
+    }, sessionCookie);
+    assert(workspaceCollection.status === 201 && workspaceCollection.body.id, 'TEST 21b: Collection can be created');
+
+    const workspaceSurvey = await request('POST', '/api/surveys', {
+      title: `Workspace Study ${Date.now()}`,
+      description: 'A complete study for workspace feature verification.',
+      status: 'draft',
+      collection_id: workspaceCollection.body.id,
+      target_responses: 10,
+      response_limit: 12,
+      questions: [{ question_text: 'Is this workspace test clear?', question_type: 'yes_no', is_required: true, sort_order: 1 }]
+    }, sessionCookie);
+    const workspaceSurveyId = workspaceSurvey.body.id;
+    assert(workspaceSurvey.status === 201 && workspaceSurvey.body.target_responses === 10, 'TEST 21c: Target responses and collection assignment persist');
+
+    const readiness = await request('GET', `/api/surveys/${workspaceSurveyId}/readiness`, null, sessionCookie);
+    const invalidTarget = await request('PUT', `/api/surveys/${workspaceSurveyId}`, {
+      title: workspaceSurvey.body.title,
+      description: workspaceSurvey.body.description,
+      target_responses: 13,
+      response_limit: 12
+    }, sessionCookie);
+    assert(readiness.status === 200 && readiness.body.ready === true && invalidTarget.status === 400, 'TEST 21d: Readiness and target/limit validation are deterministic');
+
+    const duplicate = await request('POST', `/api/surveys/${workspaceSurveyId}/duplicate`, {}, sessionCookie);
+    const duplicateDetails = await request('GET', `/api/surveys/${duplicate.body.id}`, null, sessionCookie);
+    assert(duplicate.status === 201 && duplicate.body.status === 'draft' && duplicateDetails.body.questions.length === 1 && duplicateDetails.body.response_count === 0, 'TEST 21e: Duplicate copies questions but not responses');
+
+    const template = await request('POST', `/api/surveys/${workspaceSurveyId}/templates`, { name: `Workspace Template ${Date.now()}` }, sessionCookie);
+    const templateRename = await request('PUT', `/api/templates/${template.body.id}`, { name: `Renamed Workspace Template ${Date.now()}` }, sessionCookie);
+    const templateSurvey = await request('POST', `/api/templates/${template.body.id}/create-survey`, { title: `Template Study ${Date.now()}` }, sessionCookie);
+    assert(template.status === 201 && templateRename.status === 200 && templateRename.body.name.startsWith('Renamed Workspace Template') && templateSurvey.status === 201 && templateSurvey.body.status === 'draft', 'TEST 21f: Templates can be renamed and create independent draft surveys');
+
+    const note = await request('POST', `/api/surveys/${workspaceSurveyId}/notes`, { note_text: 'Private pilot-testing note.' }, sessionCookie);
+    const notes = await request('GET', `/api/surveys/${workspaceSurveyId}/notes`, null, sessionCookie);
+    const publicWorkspaceSurvey = await request('GET', `/api/public/surveys/${workspaceSurveyId}`);
+    assert(note.status === 201 && notes.status === 200 && notes.body.length === 1 && !JSON.stringify(publicWorkspaceSurvey.body).includes('Private pilot-testing note.'), 'TEST 21g: Private notes are protected and excluded from public APIs');
+
+    const pin = await request('POST', `/api/surveys/${workspaceSurveyId}/pin`, { pinned: true }, sessionCookie);
+    const pinnedList = await request('GET', '/api/surveys?pinned=true', null, sessionCookie);
+    assert(pin.status === 200 && pinnedList.body.some(survey => survey.id === workspaceSurveyId && survey.is_pinned === 1), 'TEST 21h: Pinning persists and is filterable');
+
+    const comparison = await request('GET', `/api/surveys/compare?ids=${workspaceSurveyId},${duplicate.body.id}`, null, sessionCookie);
+    const invalidComparison = await request('GET', `/api/surveys/compare?ids=${workspaceSurveyId}`, null, sessionCookie);
+    assert(comparison.status === 200 && comparison.body.surveys.length === 2 && invalidComparison.status === 400, 'TEST 21i: Cross-survey comparison validates IDs and returns real metrics');
+
+    const savedView = await request('POST', '/api/saved-views', {
+      name: `Workspace View ${Date.now()}`,
+      view_type: 'workspace',
+      filters: { status: 'draft', collection_id: workspaceCollection.body.id, archived: false, pinned: false, search: '' }
+    }, sessionCookie);
+    const savedAnalytics = await request('POST', '/api/saved-views', {
+      name: `Analytics View ${Date.now()}`,
+      view_type: 'analytics',
+      survey_id: workspaceSurveyId,
+      filters: { from: '2026-01-01', to: '2026-09-09' }
+    }, sessionCookie);
+    assert(savedView.status === 201 && savedAnalytics.status === 201, 'TEST 21j: Workspace and analytics views can be saved');
+
+    const activeArchiveSurvey = await request('POST', '/api/surveys', {
+      title: `Active Archive Guard ${Date.now()}`,
+      status: 'active',
+      questions: [{ question_text: 'Archive protection?', question_type: 'yes_no', is_required: true, sort_order: 1 }]
+    }, sessionCookie);
+    const activeArchiveBlocked = await request('POST', `/api/surveys/${activeArchiveSurvey.body.id}/archive`, {}, sessionCookie);
+    const archive = await request('POST', `/api/surveys/${workspaceSurveyId}/archive`, {}, sessionCookie);
+    const archivedList = await request('GET', '/api/surveys?archived=true', null, sessionCookie);
+    const restore = await request('POST', `/api/surveys/${workspaceSurveyId}/restore`, {}, sessionCookie);
+    const activity = await request('GET', '/api/activity?limit=100', null, sessionCookie);
+    assert(activeArchiveBlocked.status === 400 && archive.status === 200 && archivedList.body.some(survey => survey.id === workspaceSurveyId) && restore.status === 200 && activity.body.some(item => item.action === 'SURVEY_ARCHIVED'), 'TEST 21k: Archive/restore preserves studies and records activity');
+
+    const collectionDelete = await request('DELETE', `/api/collections/${workspaceCollection.body.id}`, null, sessionCookie);
+    const unassignedDetails = await request('GET', `/api/surveys/${workspaceSurveyId}`, null, sessionCookie);
+    assert(collectionDelete.status === 200 && unassignedDetails.body.collection_id === null, 'TEST 21l: Collection deletion safely unassigns surveys');
+
+    const templateDelete = await request('DELETE', `/api/templates/${template.body.id}`, null, sessionCookie);
+    assert(templateDelete.status === 200, 'TEST 21m: Templates can be deleted');
 
     // TEST 17: Does logout work?
     const logoutRes = await request('POST', '/api/auth/logout', null, sessionCookie);
@@ -474,6 +586,19 @@ async function runTests() {
       'TEST 20f: Builder exposes and validates an optional maximum response limit'
     );
 
+    const publicSurveyScript = await request('GET', '/js/survey.js');
+    assert(
+      builderPage.raw.includes('id="one-response-per-browser"') &&
+      builderPage.raw.includes('Best-effort browser-based protection') &&
+      builderScript.raw.includes('one_response_per_browser: oneResponsePerBrowser.checked') &&
+      builderScript.raw.includes('one_response_per_browser: document.getElementById') &&
+      publicSurveyScript.status === 200 &&
+      publicSurveyScript.raw.includes("SUBMISSION_MARKER_PREFIX = 'rsad:submitted:'") &&
+      publicSurveyScript.raw.includes('saveSubmittedBrowserMarker') &&
+      publicSurveyScript.raw.includes('res.ok && data.success'),
+      'TEST 20g: Browser duplicate-response protection supports local builder recovery and accepted-response markers'
+    );
+
     const analyticsPage = await request('GET', '/analytics.html');
     const analyticsScript = await request('GET', '/js/analytics.js');
     const stylesAsset = await request('GET', '/css/styles.css');
@@ -488,7 +613,7 @@ async function runTests() {
       stylesAsset.status === 200 &&
       stylesAsset.raw.includes('.chart-actions') &&
       stylesAsset.raw.includes('.chart-actions {\n    display: none !important;'),
-      'TEST 20g: Analytics Canvas charts expose accessible PNG downloads with print-hidden controls'
+      'TEST 20h: Analytics Canvas charts expose accessible PNG downloads with print-hidden controls'
     );
 
     console.log('==============================================');

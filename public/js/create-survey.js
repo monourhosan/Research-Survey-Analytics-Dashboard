@@ -6,6 +6,13 @@
 let questionsList = [];
 let editingSurveyId = null;
 let hasExistingResponses = false;
+const LOCAL_DRAFT_SCHEMA_VERSION = 1;
+const LOCAL_DRAFT_DEBOUNCE_MS = 1000;
+let localDraftSaveTimer = null;
+let localDraftStorageAvailable = true;
+let builderReadyForLocalDrafts = false;
+let hasUnsavedBuilderChanges = false;
+let pendingRecoveryDraft = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
@@ -30,7 +37,160 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-save-draft-bottom').addEventListener('click', () => submitSurvey('draft'));
   document.getElementById('btn-publish-survey').addEventListener('click', () => submitSurvey('active'));
   document.getElementById('btn-publish-survey-bottom').addEventListener('click', () => submitSurvey('active'));
+
+  document.getElementById('survey-title').addEventListener('input', scheduleLocalDraftSave);
+  document.getElementById('survey-description').addEventListener('input', scheduleLocalDraftSave);
+  document.getElementById('btn-restore-local-draft').addEventListener('click', restorePendingLocalDraft);
+  document.getElementById('btn-discard-local-draft').addEventListener('click', discardPendingLocalDraft);
+
+  builderReadyForLocalDrafts = true;
+  offerLocalDraftRecovery();
 });
+
+window.addEventListener('beforeunload', event => {
+  if (!hasUnsavedBuilderChanges) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+function getLocalDraftKey() {
+  return editingSurveyId
+    ? `rsad:survey-builder-draft:survey-${editingSurveyId}`
+    : 'rsad:survey-builder-draft:new';
+}
+
+function getDraftStatusElement() {
+  return document.getElementById('draft-save-status');
+}
+
+function setDraftStatus(message, state = '') {
+  const status = getDraftStatusElement();
+  if (!status) return;
+  status.textContent = message;
+  status.className = `draft-save-status${state ? ` is-${state}` : ''}`;
+}
+
+function cloneDraftQuestions(questions) {
+  return (Array.isArray(questions) ? questions : []).map(question => ({
+    id: question.id,
+    question_text: String(question.question_text || ''),
+    question_type: question.question_type || 'multiple_choice',
+    options: Array.isArray(question.options) ? question.options.map(option => String(option)) : [],
+    is_required: Boolean(question.is_required)
+  }));
+}
+
+function getCurrentDraftContent() {
+  return {
+    title: document.getElementById('survey-title').value,
+    description: document.getElementById('survey-description').value,
+    questions: cloneDraftQuestions(questionsList)
+  };
+}
+
+function getDraftFingerprint(content) {
+  return JSON.stringify({
+    title: content.title,
+    description: content.description,
+    questions: content.questions.map(question => ({
+      question_text: question.question_text,
+      question_type: question.question_type,
+      options: question.options,
+      is_required: question.is_required
+    }))
+  });
+}
+
+function readLocalDraft() {
+  try {
+    const rawDraft = window.localStorage.getItem(getLocalDraftKey());
+    if (!rawDraft) return null;
+    const draft = JSON.parse(rawDraft);
+    if (draft.schemaVersion !== LOCAL_DRAFT_SCHEMA_VERSION || !draft.content || !Array.isArray(draft.content.questions)) {
+      return null;
+    }
+    return draft;
+  } catch (err) {
+    console.warn('Local draft recovery is unavailable:', err);
+    localDraftStorageAvailable = false;
+    return null;
+  }
+}
+
+function clearLocalDraft() {
+  try {
+    window.localStorage.removeItem(getLocalDraftKey());
+  } catch (err) {
+    console.warn('Unable to clear local survey draft:', err);
+  }
+}
+
+function saveLocalDraft() {
+  localDraftSaveTimer = null;
+  const content = getCurrentDraftContent();
+
+  try {
+    window.localStorage.setItem(getLocalDraftKey(), JSON.stringify({
+      schemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
+      savedAt: new Date().toISOString(),
+      content,
+      fingerprint: getDraftFingerprint(content)
+    }));
+    hasUnsavedBuilderChanges = false;
+    localDraftStorageAvailable = true;
+    const savedTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date());
+    setDraftStatus(`Draft saved locally at ${savedTime}`, 'saved');
+  } catch (err) {
+    console.warn('Unable to save local survey draft:', err);
+    localDraftStorageAvailable = false;
+    setDraftStatus('Local draft storage is unavailable', 'error');
+  }
+}
+
+function scheduleLocalDraftSave() {
+  if (!builderReadyForLocalDrafts) return;
+
+  hasUnsavedBuilderChanges = true;
+  setDraftStatus('Unsaved changes');
+  window.clearTimeout(localDraftSaveTimer);
+  localDraftSaveTimer = window.setTimeout(() => {
+    setDraftStatus('Saving draft...', 'saving');
+    saveLocalDraft();
+  }, LOCAL_DRAFT_DEBOUNCE_MS);
+}
+
+function offerLocalDraftRecovery() {
+  const storedDraft = readLocalDraft();
+  const notice = document.getElementById('draft-recovery-notice');
+  if (!storedDraft || !notice) return;
+
+  if (storedDraft.fingerprint === getDraftFingerprint(getCurrentDraftContent())) return;
+  pendingRecoveryDraft = storedDraft;
+  notice.hidden = false;
+  setDraftStatus('Local draft available', 'saved');
+}
+
+function restorePendingLocalDraft() {
+  if (!pendingRecoveryDraft) return;
+  const { content } = pendingRecoveryDraft;
+  document.getElementById('survey-title').value = content.title || '';
+  document.getElementById('survey-description').value = content.description || '';
+  questionsList = cloneDraftQuestions(content.questions);
+  renderQuestions();
+  hasUnsavedBuilderChanges = false;
+  pendingRecoveryDraft = null;
+  document.getElementById('draft-recovery-notice').hidden = true;
+  setDraftStatus('Local draft restored', 'saved');
+  showToast('Local survey draft restored', 'success');
+}
+
+function discardPendingLocalDraft() {
+  clearLocalDraft();
+  pendingRecoveryDraft = null;
+  document.getElementById('draft-recovery-notice').hidden = true;
+  setDraftStatus('Local draft discarded');
+  showToast('Local survey draft discarded', 'info');
+}
 
 // Load existing survey when in manage/edit mode
 async function loadExistingSurvey(id) {
@@ -82,6 +242,7 @@ function addQuestion(type = 'multiple_choice', text = '', isRequired = true, opt
   });
 
   renderQuestions();
+  scheduleLocalDraftSave();
 }
 
 // Remove Question
@@ -93,6 +254,7 @@ function removeQuestion(index) {
 
   questionsList.splice(index, 1);
   renderQuestions();
+  scheduleLocalDraftSave();
 }
 
 // Reorder Up
@@ -102,6 +264,7 @@ function moveQuestionUp(index) {
   questionsList[index] = questionsList[index - 1];
   questionsList[index - 1] = temp;
   renderQuestions();
+  scheduleLocalDraftSave();
 }
 
 // Reorder Down
@@ -111,6 +274,7 @@ function moveQuestionDown(index) {
   questionsList[index] = questionsList[index + 1];
   questionsList[index + 1] = temp;
   renderQuestions();
+  scheduleLocalDraftSave();
 }
 
 // Render Questions to DOM
@@ -150,7 +314,7 @@ function renderQuestions() {
           class="form-input" 
           value="${escapeHtml(q.question_text)}" 
           placeholder="Type your question prompt here..." 
-          oninput="questionsList[${index}].question_text = this.value"
+          oninput="questionsList[${index}].question_text = this.value; scheduleLocalDraftSave()"
           ${hasExistingResponses ? 'disabled' : ''}
           required
         >
@@ -176,7 +340,7 @@ function renderQuestions() {
             type="checkbox" 
             id="req-chk-${index}" 
             ${q.is_required ? 'checked' : ''} 
-            onchange="questionsList[${index}].is_required = this.checked"
+            onchange="questionsList[${index}].is_required = this.checked; scheduleLocalDraftSave()"
             ${hasExistingResponses ? 'disabled' : ''}
           >
           <label for="req-chk-${index}" style="font-size: 13.5px; cursor: pointer; font-weight: 500;">Required response</label>
@@ -210,6 +374,7 @@ function onTypeChange(index, newType) {
     questionsList[index].options = ['Option 1', 'Option 2'];
   }
   renderQuestions();
+  scheduleLocalDraftSave();
 }
 
 // Add Option for Multiple Choice
@@ -222,6 +387,7 @@ function addOption(questionIndex) {
   }
   q.options.push(`Option ${q.options.length + 1}`);
   renderOptionsForQuestion(questionIndex);
+  scheduleLocalDraftSave();
 }
 
 // Remove Option
@@ -233,6 +399,7 @@ function removeOption(questionIndex, optionIndex) {
   }
   q.options.splice(optionIndex, 1);
   renderOptionsForQuestion(questionIndex);
+  scheduleLocalDraftSave();
 }
 
 // Render Options List
@@ -252,7 +419,7 @@ function renderOptionsForQuestion(questionIndex) {
         class="form-input form-sm" 
         value="${escapeHtml(opt)}" 
         placeholder="Option label" 
-        oninput="questionsList[${questionIndex}].options[${optIdx}] = this.value"
+        oninput="questionsList[${questionIndex}].options[${optIdx}] = this.value; scheduleLocalDraftSave()"
         ${hasExistingResponses ? 'disabled' : ''}
         required
       >
@@ -541,6 +708,9 @@ async function submitSurvey(targetStatus) {
     const data = await res.json();
 
     if (res.ok) {
+      window.clearTimeout(localDraftSaveTimer);
+      hasUnsavedBuilderChanges = false;
+      clearLocalDraft();
       showToast(targetStatus === 'active' ? 'Survey published successfully!' : 'Survey saved as draft!', 'success');
       setTimeout(() => {
         window.location.href = 'surveys.html';

@@ -51,8 +51,9 @@
         <div style="display: flex; align-items: center; gap: 16px;">
           <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
           <div class="header-title-section">
+            <span class="page-kicker">Survey builder</span>
             <h1 id="page-heading">Create Research Survey</h1>
-            <p>Define survey questions and publish for public response collection</p>
+            <p>Set up your study, shape each question, and publish when it is ready.</p>
           </div>
         </div>
         <div class="header-actions">
@@ -71,8 +72,8 @@
         </div>
       </header>
 
-      <main class="content-area" style="max-width: 900px;">
-        <form id="survey-builder-form">
+      <main class="content-area builder-content">
+        <form id="survey-builder-form" class="survey-builder-form">
           <section id="draft-recovery-notice" class="draft-recovery-notice" hidden aria-live="polite">
             <div>
               <strong>A newer locally saved draft was found.</strong>
@@ -85,9 +86,26 @@
           </section>
 
           <!-- Survey Metadata Card -->
-          <div class="card">
+          <section class="builder-intro">
+            <div>
+              <span class="page-kicker">Research workspace</span>
+              <h2>Build a clear, response-ready survey.</h2>
+              <p>Start with the study details, then add and arrange the questions respondents will see.</p>
+            </div>
+            <div class="builder-intro-note" aria-label="Builder guidance">
+              <span>01</span>
+              <p>Save as a draft any time. Publishing validates the survey before it opens to respondents.</p>
+            </div>
+          </section>
+
+          <!-- Survey Metadata Card -->
+          <section class="card builder-details-card">
             <div class="card-header">
-              <h2 class="card-title">Survey Details</h2>
+              <div>
+                <span class="page-kicker">Study settings</span>
+                <h2 class="card-title">Survey details</h2>
+              </div>
+              <span class="builder-section-number" aria-hidden="true">01</span>
             </div>
             <div class="card-body">
               <div class="form-group">
@@ -140,30 +158,39 @@
                 <p class="form-help-text">Best-effort browser-based protection. Users may still submit again from another browser/device or after clearing browser data.</p>
               </div>
             </div>
-          </div>
+          </section>
 
           <!-- Question Set Section -->
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <section class="builder-questions-section">
+            <div class="builder-questions-heading">
             <div>
-              <h2 style="font-size: 18px; font-weight: 700; color: var(--color-text);">Survey Questions</h2>
-              <p style="font-size: 13px; color: var(--color-text-muted);">
+                <span class="page-kicker">Question authoring</span>
+                <h2>Survey questions</h2>
+                <p>
                 Supported types: Short Text, Multiple Choice (2–6 options), Rating 1–5, Yes/No
               </p>
             </div>
             <button type="button" id="btn-add-question" class="btn btn-teal btn-sm">
               <span>➕</span> Add Question
             </button>
-          </div>
+            </div>
 
-          <div id="questions-container">
+          <div id="questions-container" class="builder-questions-list">
             <!-- Questions rendered dynamically -->
           </div>
+          </section>
 
-          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
-            <a href="surveys.html" class="btn btn-secondary">Cancel</a>
-            <button type="button" id="btn-preview-survey-bottom" class="btn btn-secondary">Preview</button>
-            <button type="button" id="btn-save-draft-bottom" class="btn btn-secondary">Save Draft</button>
-            <button type="button" id="btn-publish-survey-bottom" class="btn btn-primary">Publish Survey</button>
+          <div class="builder-action-bar">
+            <div class="builder-action-copy">
+              <strong>Ready to share your study?</strong>
+              <span>Preview the respondent experience or save your work for later.</span>
+            </div>
+            <div class="builder-action-buttons">
+              <a href="surveys.html" class="btn btn-secondary">Cancel</a>
+              <button type="button" id="btn-preview-survey-bottom" class="btn btn-secondary">Preview</button>
+              <button type="button" id="btn-save-draft-bottom" class="btn btn-secondary">Save Draft</button>
+              <button type="button" id="btn-publish-survey-bottom" class="btn btn-primary">Publish Survey</button>
+            </div>
           </div>
         </form>
       </main>

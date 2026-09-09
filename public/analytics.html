@@ -51,6 +51,7 @@
         <div style="display: flex; align-items: center; gap: 16px;">
           <button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
           <div class="header-title-section">
+            <span class="page-kicker">Research reporting</span>
             <h1 id="survey-title-display">Survey Analytics</h1>
             <p id="survey-meta-display">Loading survey metrics and distribution analysis...</p>
           </div>
@@ -65,7 +66,7 @@
         </div>
       </header>
 
-      <main class="content-area">
+      <main class="content-area analytics-content">
         <section class="analytics-toolbar card no-print" aria-labelledby="analytics-filter-title">
           <div class="analytics-toolbar-copy">
             <h2 id="analytics-filter-title">Research Date Filter</h2>
@@ -100,26 +101,26 @@
         </div>
 
         <!-- Overview Cards -->
-        <section class="metrics-grid">
-          <div class="metric-card">
+        <section class="metrics-grid analytics-metrics">
+          <div class="metric-card analytics-metric-card analytics-metric-highlight">
             <div class="metric-label">Total Responses</div>
             <div class="metric-value" id="metric-total-responses" style="color: var(--color-primary);">0</div>
             <div class="metric-meta" id="metric-total-meta">Completed submissions</div>
           </div>
 
-          <div class="metric-card">
+          <div class="metric-card analytics-metric-card">
             <div class="metric-label">Average Rating</div>
             <div class="metric-value" id="metric-avg-rating" style="color: var(--color-secondary);">N/A</div>
             <div class="metric-meta" id="metric-rating-meta">Overall satisfaction score</div>
           </div>
 
-          <div class="metric-card">
+          <div class="metric-card analytics-metric-card">
             <div class="metric-label">Latest Response</div>
             <div class="metric-value" id="metric-latest-date" style="font-size: 20px; padding-top: 6px;">None</div>
             <div class="metric-meta">Most recent timestamp</div>
           </div>
 
-          <div class="metric-card">
+          <div class="metric-card analytics-metric-card">
             <div class="metric-label">7-Day Response Growth</div>
             <div class="metric-value" id="metric-growth-trend">0%</div>
             <div class="metric-meta" id="metric-growth-meta">vs. previous 7-day period</div>
@@ -127,7 +128,7 @@
         </section>
 
         <!-- Automated Insight Engine Banner (Signature Feature) -->
-        <section class="insights-banner" id="insights-section" style="display: none;">
+        <section class="insights-banner analytics-insights-banner" id="insights-section" style="display: none;">
           <div class="insights-header">
             <div class="insights-title">
               <span>💡</span> Automated Research Insights
@@ -142,16 +143,17 @@
         </section>
 
         <!-- Question-by-Question Analysis -->
-        <div style="margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+        <section class="analytics-analysis-heading">
           <div>
-            <h2 style="font-size: 19px; font-weight: 700; color: var(--color-text);">Question Analysis & Visualizations</h2>
-            <p style="font-size: 13px; color: var(--color-text-muted);">
+            <span class="page-kicker">Response evidence</span>
+            <h2>Question analysis &amp; visualizations</h2>
+            <p>
               Distribution charts rendered with native HTML5 Canvas and Vanilla JavaScript
             </p>
           </div>
-        </div>
+        </section>
 
-        <div id="questions-analysis-container">
+        <div id="questions-analysis-container" class="analytics-question-list">
           <!-- Question analysis cards with canvas charts injected here -->
         </div>
       </main>

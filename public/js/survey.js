@@ -178,7 +178,7 @@ function renderRespondentForm(data) {
             </label>
           `).join('')}
         </div>
-        <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-muted); margin-top: 8px;">
+        <div class="respondent-rating-hint">
           <span>1 = Very Dissatisfied / Poor</span>
           <span>5 = Very Satisfied / Excellent</span>
         </div>
@@ -196,12 +196,12 @@ function renderRespondentForm(data) {
       `;
     } else if (q.question_type === 'yes_no') {
       html += `
-        <div class="choice-list" style="flex-direction: row; gap: 16px;">
-          <label class="choice-item" style="flex: 1;">
+        <div class="choice-list respondent-yes-no">
+          <label class="choice-item">
             <input type="radio" name="q_${q.id}" value="Yes" ${q.is_required ? 'required' : ''}>
             <span>Yes</span>
           </label>
-          <label class="choice-item" style="flex: 1;">
+          <label class="choice-item">
             <input type="radio" name="q_${q.id}" value="No">
             <span>No</span>
           </label>
@@ -235,8 +235,8 @@ function renderRespondentForm(data) {
           <span>I understand this notice and consent to submit my response.</span>
         </label>
       </section>
-      <div style="margin-top: 32px;">
-        <button type="submit" id="btn-submit-survey" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 16px;">
+      <div class="respondent-submit-area">
+        <button type="submit" id="btn-submit-survey" class="btn btn-primary respondent-submit-button">
           Submit Response
         </button>
       </div>

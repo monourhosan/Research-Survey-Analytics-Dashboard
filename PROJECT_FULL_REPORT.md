@@ -128,6 +128,8 @@ The current implementation is a **single-administrator research dashboard** inte
 
 - Survey title and description fields.
 - Draft, active, and closed lifecycle states.
+- Optional UTC response deadline with automatic public response closure.
+- Optional maximum response limit with automatic capacity closure.
 - Question ordering controls.
 - Required/optional setting for questions.
 - Multiple-choice questions limited to two through six valid choices.
@@ -137,6 +139,8 @@ The current implementation is a **single-administrator research dashboard** inte
 
 - Active surveys are available at `/survey.html?id=<surveyId>`.
 - Closed and draft surveys reject public submissions.
+- Expired active surveys reject public loading and submissions while retaining historic results.
+- Full active surveys reject public loading and submissions while retaining historic results.
 - Required questions are highlighted when missing.
 - Rating, yes/no, and multiple-choice answers are validated server-side.
 - Double submission is prevented on the client while a request is in progress.
@@ -157,6 +161,7 @@ The current implementation is a **single-administrator research dashboard** inte
 - HTML5 Canvas bar charts with high-DPI rendering support.
 - Date-range filtering that affects metrics, charts, insights, and CSV export together.
 - Browser print layout for physical printing or saving as PDF.
+- Each rendered Canvas chart can be downloaded as a high-resolution PNG with a sanitized survey/question filename and the active date range when filtered. Text-response sections intentionally do not show a chart-download action.
 
 ### 5.6 Data export
 
@@ -189,6 +194,21 @@ The current implementation is a **single-administrator research dashboard** inte
 - A recovery record contains only builder content (title, description, question order, types, options, required flags, schema version, and timestamp). It never contains credentials, cookies, session data, secrets, or respondent responses.
 - When a stored record differs from the loaded builder state, the administrator chooses **Restore Draft** or **Discard Draft**; server data is never overwritten silently.
 - The local record is cleared only after a successful intentional server save or publish. If storage or a server save fails, normal builder work continues and any recovery data is preserved where possible.
+
+### 5.10 Survey response deadline / expiration
+
+- The administrator may choose an optional local date and time in the builder; leaving it blank keeps manual close behavior unchanged.
+- The browser converts the selected value to a UTC ISO timestamp. The server validates and normalizes it before persistence in nullable `surveys.response_deadline`.
+- A past deadline cannot be attached to an active survey and a draft with a past deadline cannot be published.
+- The public survey GET and response POST endpoints enforce the deadline authoritatively. They return HTTP `403` with `SURVEY_EXPIRED` after expiration, so the interface can show a clear message.
+- Expiration affects only future submissions. Prior responses, analytics, and CSV exports remain accessible; an administrator can remove the deadline to resume an otherwise active survey.
+
+### 5.11 Maximum response limit
+
+- The builder can enable an optional whole-number maximum between 1 and 1,000,000. A disabled setting stores `null`, so existing and new unlimited surveys retain their original behavior.
+- The server validates the value on create and update. Zero, negatives, decimals, empty enabled values, and values above the defined maximum are rejected.
+- The public GET and POST routes report HTTP `403` with `SURVEY_RESPONSE_LIMIT_REACHED` once the stored response count reaches the configured maximum.
+- Admission checks, response insertion, and answer insertion run in one SQLite transaction and are serialized within the current Node.js process. Lowering the limit never deletes prior responses; it simply makes the survey full when the stored count is at or above the new limit.
 
 ---
 
@@ -344,7 +364,7 @@ erDiagram
 | Table | Purpose | Important fields |
 | --- | --- | --- |
 | `users` | Stores administrator accounts | `email` is unique; `password_hash` stores a salted hash |
-| `surveys` | Stores survey metadata and lifecycle state | `title`, `description`, `status`, timestamps |
+| `surveys` | Stores survey metadata, lifecycle state, expiry, and capacity | `title`, `description`, `status`, nullable `response_deadline`, nullable `response_limit`, timestamps |
 | `questions` | Stores survey questions | type, required flag, order, and optional choice array |
 | `responses` | Represents one completed respondent submission | survey foreign key and submission timestamp |
 | `answers` | Stores individual answers for a response/question pair | response foreign key, question foreign key, answer text |
@@ -356,6 +376,7 @@ erDiagram
 - Cascade rules remove dependent child data when a parent record is removed.
 - The application additionally blocks deletion of a survey that has recorded responses, preserving research data even though the relational schema supports cascades.
 - Prepared statements and bound parameters are used for database values.
+- Response-limit admission, response creation, and answer creation use an SQLite transaction after an in-process submission queue. This is dependable for the current single process, but distributed serverless instances require a shared transactional database for global capacity coordination.
 
 ### 9.4 Data persistence behavior
 
@@ -393,6 +414,10 @@ sequenceDiagram
 | Draft | Survey is being prepared and is not public | Publish when at least one question exists |
 | Active | Survey is publicly available and accepts responses | Close survey |
 | Closed | Existing results remain available, but public responses are blocked | No public submissions |
+
+An active survey with a passed `response_deadline` retains its active status and reporting history, but the public API rejects new responses automatically.
+
+An active survey with `response_count >= response_limit` behaves similarly: it remains available for management and analytics but no longer accepts public responses.
 
 ### 10.3 Public respondent workflow
 
@@ -463,7 +488,7 @@ sequenceDiagram
 | `201` | Survey or response created successfully |
 | `400` | Invalid or incomplete request data |
 | `401` | Protected resource requested without an authenticated session |
-| `403` | Public access blocked because a survey is draft or closed |
+| `403` | Public access blocked because a survey is draft, closed, expired (`SURVEY_EXPIRED`), or full (`SURVEY_RESPONSE_LIMIT_REACHED`) |
 | `404` | Requested survey/resource does not exist |
 | `500` | Unexpected server or database initialization error |
 
@@ -535,6 +560,7 @@ Validation is performed on both the frontend and backend. Client-side validation
 | --- | --- |
 | Login | Email and password must be supplied |
 | Survey creation | Title required; title length limited; active survey requires questions |
+| Response limit | Optional whole number from 1 to 1,000,000; null means unlimited |
 | Multiple choice | Between 2 and 6 non-empty options |
 | Public response | Required questions must be answered |
 | Rating | Must be an integer from 1 through 5 |
@@ -549,7 +575,7 @@ Validation is performed on both the frontend and backend. Client-side validation
 - **HTTP-only cookies:** Session cookies are configured as `httpOnly` with `sameSite: 'lax'` and a 24-hour maximum age.
 - **SQL injection prevention:** SQL values are passed as parameters rather than concatenated into query strings.
 - **Cross-site scripting reduction:** Client-rendered user text is escaped or inserted as text rather than trusted raw HTML.
-- **Public lifecycle enforcement:** Draft and closed surveys reject public response submissions on the server.
+- **Public lifecycle enforcement:** Draft, closed, deadline-expired, and response-limit-full surveys reject public response submissions on the server.
 - **Deletion safeguard:** Surveys with existing responses cannot be deleted through the application.
 - **CSV escaping:** Commas, quotation marks, and line breaks are quoted/escaped for standards-compliant export.
 
@@ -558,7 +584,7 @@ Validation is performed on both the frontend and backend. Client-side validation
 - Respondents do not need to create an account.
 - The public response page contains a research participation notice and consent control.
 - The project is designed to collect survey answers rather than unnecessary respondent identity data.
-- Administrators can close a survey to stop new data collection while preserving prior results.
+- Administrators can close a survey, set a response deadline, or set a maximum response limit while preserving prior results.
 
 ### 13.4 Production security recommendations
 
@@ -575,7 +601,7 @@ The interface uses a shared visual system in `public/css/styles.css`:
 - Design tokens for colors, spacing, borders, radii, and shadows.
 - Consistent sidebar navigation across administration pages.
 - Responsive layouts for desktop and smaller screens.
-- Clear status badges for draft, active, and closed surveys.
+- Clear status badges for draft, active, closed, and deadline-expired survey states.
 - Reusable buttons, cards, form controls, toast notifications, and confirmation dialogs.
 - A separate print stylesheet that hides unnecessary navigation and controls for reports.
 
@@ -586,9 +612,9 @@ The interface uses a shared visual system in `public/css/styles.css`:
 | `index.html` | Entry/landing route |
 | `login.html` | Administrator sign-in with demo autofill for defense use |
 | `dashboard.html` | Summary metrics and recent survey activity |
-| `surveys.html` | Search, filter, copy public links, publish, close, and manage surveys |
-| `create-survey.html` | Dynamic survey/question builder and editor |
-| `survey.html` | Public respondent form with consent and progress |
+| `surveys.html` | Search, filter, deadline/capacity visibility, copy public links, publish, close, and manage surveys |
+| `create-survey.html` | Dynamic survey/question builder, deadline/limit controls, and editor |
+| `survey.html` | Public respondent form with consent, progress, expired-survey, and full-survey messaging |
 | `analytics.html` | Metrics, insights, charts, date filtering, CSV export, and print report |
 
 ### 14.3 Accessibility-oriented details
@@ -734,7 +760,7 @@ node test_suite.js
 - One administrator role; there is no multi-user role hierarchy.
 - The project uses an in-memory/default `express-session` store, which is appropriate for a demonstration but not for a scalable production service.
 - Serverless temporary filesystem storage is not a durable shared database across cold starts or multiple instances.
-- The application does not currently provide respondent authentication, anonymous response limits, email invitations, or scheduled reminders.
+- The application does not currently provide respondent authentication, email invitations, or scheduled reminders.
 - Analytics focus on descriptive statistics rather than advanced statistical inference.
 - There is no configurable branding, multilingual UI, or conditional survey branching.
 
@@ -744,7 +770,7 @@ node test_suite.js
 2. Replace the default session store with Redis, database-backed sessions, or another production-ready session provider.
 3. Store session secrets and administrator credentials in environment variables or a secrets manager.
 4. Add role-based access control for researchers, collaborators, reviewers, and administrators.
-5. Add email invitations, response deadlines, reminder schedules, and opt-out support.
+5. Add email invitations, reminder schedules, and opt-out support.
 6. Add conditional question logic and survey templates.
 7. Add cross-tabulations, demographic segmentation, and downloadable charts.
 8. Add CSV import/export mapping and a dedicated PDF report generator.
@@ -778,6 +804,8 @@ node test_suite.js
 | How are charts created? | The frontend renders them with the native HTML5 Canvas 2D API, so no charting framework is required. |
 | Is the insight engine AI? | No. It is an explainable rule-based system that produces statements from calculated averages, percentages, modes, and thresholds. |
 | Why are closed surveys retained? | Closing stops new submissions but preserves existing responses and analytics for research integrity. |
+| How are response deadlines enforced? | The server stores an optional UTC timestamp and checks it on every public form request and submission, so browser-side changes cannot bypass expiration. |
+| How are maximum responses enforced? | The server checks capacity inside a serialized SQLite transaction before storing a response and returns a structured full-survey code when the maximum is reached. |
 | How do date filters work? | The server validates the date range and uses it consistently in analytics and CSV queries. |
 
 ### 19.3 Best files to study before defense
@@ -809,6 +837,8 @@ The most important outcome is not only that the application collects responses, 
 | Authentication and sessions | `server.js`, `database.js`, `public/login.html`, `public/js/login.js`, `public/js/common.js` |
 | Survey management | `server.js`, `public/surveys.html`, `public/js/surveys.js` |
 | Survey builder | `server.js`, `public/create-survey.html`, `public/js/create-survey.js` |
+| Response deadlines | `database.js`, `server.js`, `public/create-survey.html`, `public/js/create-survey.js`, `public/js/survey.js` |
+| Response limits | `database.js`, `server.js`, `public/create-survey.html`, `public/js/create-survey.js`, `public/js/survey.js`, `public/js/surveys.js` |
 | Public respondent flow | `server.js`, `public/survey.html`, `public/js/survey.js` |
 | Dashboard | `server.js`, `public/dashboard.html`, `public/js/dashboard.js` |
 | Analytics, charts, filter, export | `server.js`, `public/analytics.html`, `public/js/analytics.js` |

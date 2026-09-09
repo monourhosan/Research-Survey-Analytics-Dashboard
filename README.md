@@ -44,12 +44,16 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
      - **Yes / No**
    - Question reordering with Up / Down controls.
    - Survey lifecycle management: **Draft**, **Active (Published)**, and **Closed**.
+   - Optional UTC response deadline with automatic public response closure.
+   - Optional maximum response limit (1 to 1,000,000) with automatic public closure when full.
    - Instant inventory search by title/description and status filtering.
 3. **Public Respondent Flow**:
    - Clean, distraction-free questionnaire page accessible at `/survey.html?id=:id`.
    - Client-side and server-side validation for required fields.
    - Live completion progress plus an explicit research participation notice and consent checkbox.
    - Double-submission prevention.
+   - Expired surveys show a clear deadline message and reject new submissions server-side.
+   - Full surveys show a clear capacity message and reject further submissions server-side.
    - Professional confirmation "Thank You" screen upon completion.
 4. **Interactive Analytics Dashboard**:
    - Overall submission counts and latest response timestamp.
@@ -58,6 +62,7 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
    - Question-level distributions and percentages.
    - Server-validated inclusive date filters that update totals, charts, insights, and exports together.
    - Browser print layout for a clean hard copy or **Save as PDF** report.
+   - Download each rendered Canvas chart as a high-resolution PNG, including the active date-filter period in the filename when applicable.
 5. **HTML5 Canvas Chart Engine**:
    - Pure Vanilla JS canvas renderer supporting horizontal bar charts and rating breakdowns.
    - High-DPI (Retina) scaling support for crisp presentation on university projectors and laptop screens.
@@ -74,6 +79,14 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
 10. **Browser-based Draft Recovery**:
    - The survey builder debounces changes and saves a recovery copy only in the administrator's browser storage.
    - On reopening the same new or existing survey, administrators can explicitly restore or discard a newer local draft. This is local recovery, not cloud or server autosave.
+11. **Survey Response Deadline / Expiration**:
+   - An optional builder control stores a selected date and time as a UTC ISO timestamp; blank keeps manual closing behavior.
+   - The server blocks public survey loading and response submission after the deadline using the `SURVEY_EXPIRED` response code.
+   - Earlier responses, analytics, and CSV exports remain available after expiration, and removing the deadline reopens an active survey.
+12. **Maximum Response Limit**:
+   - Administrators may enable a whole-number maximum response count from 1 to 1,000,000, or leave the survey unlimited.
+   - The public API includes current capacity for available surveys and returns `SURVEY_RESPONSE_LIMIT_REACHED` after the limit is reached.
+   - Admission, response creation, and answer storage run in a SQLite transaction serialized by the current Node.js process; existing data is never deleted if an administrator lowers a limit below the stored response count.
 
 ---
 
@@ -184,6 +197,8 @@ erDiagram
         TEXT title
         TEXT description
         TEXT status "draft | active | closed"
+        TEXT response_deadline "nullable UTC ISO timestamp"
+        INTEGER response_limit "nullable positive maximum"
         DATETIME created_at
         DATETIME updated_at
     }
@@ -234,6 +249,8 @@ erDiagram
 ### Public Survey Submission (`/api/public`)
 - `GET /api/public/surveys/:id` — Public survey details and questions (Open).
 - `POST /api/public/surveys/:id/responses` — Submit completed response (Open).
+
+Public survey retrieval and submission can return HTTP `403` with `SURVEY_EXPIRED` or `SURVEY_RESPONSE_LIMIT_REACHED` when an active survey is no longer accepting responses.
 
 ### Analytics & Export (`/api/surveys/:id`)
 - `GET /api/surveys/:id/analytics?from=YYYY-MM-DD&to=YYYY-MM-DD` — Statistical calculations and automated insights for an optional inclusive response period (Protected).
@@ -294,6 +311,7 @@ This populates the *"Customer Satisfaction Survey"* with 25 realistic responses,
 - Date-range filtering with synchronized metrics and charts.
 - CSV export file generation.
 - Print-ready analytics reports that can be saved as PDF.
+- PNG chart downloads for presentation, report, and paper workflows; text-response sections do not show chart-download controls.
 
 *(Running `node seed.js` multiple times will not duplicate the survey).*
 
@@ -331,6 +349,7 @@ The **Automated Insight Engine** is a deterministic, rule-based inference module
 - **Cross-Site Scripting (XSS) Prevention**: User-entered responses and question texts are rendered using `textContent` and HTML escaping rather than raw `innerHTML`.
 - **Credential Protection**: Passwords are never stored in plaintext. They are salted and hashed using Node's cryptographic primitives (`scrypt`).
 - **Data Integrity Protection**: Surveys that have recorded responses cannot be deleted (they must be closed instead), preventing accidental data loss.
+- **Capacity integrity**: Response-limit admission and response/answer insertion are grouped in a SQLite transaction. This protects the current single process; production multi-instance deployments need a shared transactional database to coordinate capacity globally.
 
 ---
 

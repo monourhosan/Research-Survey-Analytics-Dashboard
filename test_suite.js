@@ -246,6 +246,164 @@ async function runTests() {
     const csvExport = await request('GET', `/api/surveys/${createdId}/export.csv`, null, sessionCookie);
     assert(csvExport.status === 200 && typeof csvExport.raw === 'string' && csvExport.raw.includes('Response ID'), 'TEST 16: CSV export generates RFC 4180 formatted data');
 
+    // TEST 16a-g: Optional response deadline is persisted, enforced, removable, and analytics-safe.
+    const futureDeadline = new Date(Date.now() + 1600).toISOString();
+    const deadlineSurvey = await request('POST', '/api/surveys', {
+      title: 'Deadline Enforcement Test Survey',
+      description: 'Verifies automatic public response closure.',
+      status: 'draft',
+      response_deadline: futureDeadline,
+      questions: [{
+        question_text: 'Will this deadline be enforced?',
+        question_type: 'yes_no',
+        is_required: true,
+        sort_order: 1
+      }]
+    }, sessionCookie);
+    assert(
+      deadlineSurvey.status === 201 && deadlineSurvey.body.response_deadline === futureDeadline,
+      'TEST 16a: Future response deadline persists as a UTC timestamp'
+    );
+
+    const deadlineSurveyId = deadlineSurvey.body.id;
+    const invalidDeadline = await request('PUT', `/api/surveys/${deadlineSurveyId}`, {
+      title: 'Deadline Enforcement Test Survey',
+      description: 'Verifies automatic public response closure.',
+      response_deadline: 'not-a-date'
+    }, sessionCookie);
+    assert(invalidDeadline.status === 400, 'TEST 16b: Invalid response deadline is rejected');
+
+    const publishDeadlineSurvey = await request('POST', `/api/surveys/${deadlineSurveyId}/publish`, null, sessionCookie);
+    assert(publishDeadlineSurvey.status === 200, 'TEST 16c: Survey with a future deadline can be published');
+
+    const futureDeadlinePublic = await request('GET', `/api/public/surveys/${deadlineSurveyId}`);
+    const deadlineQuestion = futureDeadlinePublic.body.questions && futureDeadlinePublic.body.questions[0];
+    const futureDeadlineSubmit = await request('POST', `/api/public/surveys/${deadlineSurveyId}/responses`, {
+      answers: deadlineQuestion ? { [deadlineQuestion.id]: 'Yes' } : {}
+    });
+    assert(
+      futureDeadlinePublic.status === 200 && futureDeadlineSubmit.status === 201,
+      'TEST 16d: Survey accepts a response before its deadline'
+    );
+
+    const pastDeadlineUpdate = await request('PUT', `/api/surveys/${deadlineSurveyId}`, {
+      title: 'Deadline Enforcement Test Survey',
+      description: 'Verifies automatic public response closure.',
+      response_deadline: new Date(Date.now() - 60000).toISOString()
+    }, sessionCookie);
+    assert(pastDeadlineUpdate.status === 400, 'TEST 16e: Active survey cannot receive a past deadline');
+
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    const expiredPublic = await request('GET', `/api/public/surveys/${deadlineSurveyId}`);
+    const expiredSubmit = await request('POST', `/api/public/surveys/${deadlineSurveyId}/responses`, { answers: {} });
+    assert(
+      expiredPublic.status === 403 && expiredPublic.body.code === 'SURVEY_EXPIRED' &&
+      expiredSubmit.status === 403 && expiredSubmit.body.code === 'SURVEY_EXPIRED',
+      'TEST 16f: Expired survey blocks public loading and submissions with a clear code'
+    );
+
+    const expiredAnalytics = await request('GET', `/api/surveys/${deadlineSurveyId}/analytics`, null, sessionCookie);
+    const expiredCsv = await request('GET', `/api/surveys/${deadlineSurveyId}/export.csv`, null, sessionCookie);
+    const removeDeadline = await request('PUT', `/api/surveys/${deadlineSurveyId}`, {
+      title: 'Deadline Enforcement Test Survey',
+      description: 'Verifies automatic public response closure.',
+      response_deadline: null
+    }, sessionCookie);
+    const reopenedPublic = await request('GET', `/api/public/surveys/${deadlineSurveyId}`);
+    assert(
+      expiredAnalytics.status === 200 && expiredAnalytics.body.summary.totalResponses === 1 &&
+      expiredCsv.status === 200 && expiredCsv.raw.includes('Response ID') &&
+      removeDeadline.status === 200 && reopenedPublic.status === 200,
+      'TEST 16g: Expiration preserves analytics and CSV data, and deadline removal reopens the active survey'
+    );
+
+    // TEST 16h-n: Response limits are validated, atomically enforced, and reporting-safe.
+    const limitDeadline = new Date(Date.now() + 60000).toISOString();
+    const limitedSurvey = await request('POST', '/api/surveys', {
+      title: 'Response Limit Enforcement Test Survey',
+      description: 'Verifies maximum response handling.',
+      status: 'draft',
+      response_deadline: limitDeadline,
+      response_limit: 2,
+      questions: [{
+        question_text: 'Is the response limit working?',
+        question_type: 'yes_no',
+        is_required: true,
+        sort_order: 1
+      }]
+    }, sessionCookie);
+    assert(
+      limitedSurvey.status === 201 && limitedSurvey.body.response_limit === 2,
+      'TEST 16h: Response limit persists alongside a future deadline'
+    );
+
+    const limitedSurveyId = limitedSurvey.body.id;
+    const invalidLimit = await request('POST', '/api/surveys', {
+      title: 'Invalid Limit Survey',
+      status: 'draft',
+      response_limit: 0,
+      questions: []
+    }, sessionCookie);
+    const decimalLimit = await request('PUT', `/api/surveys/${limitedSurveyId}`, {
+      title: 'Response Limit Enforcement Test Survey',
+      description: 'Verifies maximum response handling.',
+      response_limit: 1.5
+    }, sessionCookie);
+    assert(
+      invalidLimit.status === 400 && decimalLimit.status === 400,
+      'TEST 16i: Zero and decimal response limits are rejected'
+    );
+
+    const publishLimitedSurvey = await request('POST', `/api/surveys/${limitedSurveyId}/publish`, null, sessionCookie);
+    const limitedPublic = await request('GET', `/api/public/surveys/${limitedSurveyId}`);
+    const limitedQuestion = limitedPublic.body.questions && limitedPublic.body.questions[0];
+    assert(
+      publishLimitedSurvey.status === 200 && limitedPublic.status === 200 &&
+      limitedPublic.body.response_limit === 2 && limitedPublic.body.response_count === 0,
+      'TEST 16j: Public API exposes an available configured response limit'
+    );
+
+    const firstLimitedResponse = await request('POST', `/api/public/surveys/${limitedSurveyId}/responses`, {
+      answers: limitedQuestion ? { [limitedQuestion.id]: 'Yes' } : {}
+    });
+    const secondLimitedResponse = await request('POST', `/api/public/surveys/${limitedSurveyId}/responses`, {
+      answers: limitedQuestion ? { [limitedQuestion.id]: 'No' } : {}
+    });
+    assert(
+      firstLimitedResponse.status === 201 && secondLimitedResponse.status === 201,
+      'TEST 16k: Responses below and at the configured limit are accepted'
+    );
+
+    const fullPublic = await request('GET', `/api/public/surveys/${limitedSurveyId}`);
+    const overLimitResponse = await request('POST', `/api/public/surveys/${limitedSurveyId}/responses`, {
+      answers: limitedQuestion ? { [limitedQuestion.id]: 'Yes' } : {}
+    });
+    assert(
+      fullPublic.status === 403 && fullPublic.body.code === 'SURVEY_RESPONSE_LIMIT_REACHED' &&
+      overLimitResponse.status === 403 && overLimitResponse.body.code === 'SURVEY_RESPONSE_LIMIT_REACHED',
+      'TEST 16l: Reached response limit blocks public loading and a further valid submission'
+    );
+
+    const lowerLimit = await request('PUT', `/api/surveys/${limitedSurveyId}`, {
+      title: 'Response Limit Enforcement Test Survey',
+      description: 'Verifies maximum response handling.',
+      response_limit: 1
+    }, sessionCookie);
+    const limitedDetails = await request('GET', `/api/surveys/${limitedSurveyId}`, null, sessionCookie);
+    const limitedAnalytics = await request('GET', `/api/surveys/${limitedSurveyId}/analytics`, null, sessionCookie);
+    const limitedCsv = await request('GET', `/api/surveys/${limitedSurveyId}/export.csv`, null, sessionCookie);
+    assert(
+      lowerLimit.status === 200 && limitedDetails.body.response_limit === 1 && limitedDetails.body.response_count === 2 &&
+      limitedAnalytics.status === 200 && limitedAnalytics.body.summary.totalResponses === 2 &&
+      limitedCsv.status === 200 && limitedCsv.raw.trim().split(/\r?\n/).length === 3,
+      'TEST 16m: Lowering a limit retains existing responses, analytics, and CSV rows'
+    );
+
+    assert(
+      publicSurvey.body.response_limit === null,
+      'TEST 16n: Surveys without a response limit remain unlimited'
+    );
+
     // TEST 17: Does logout work?
     const logoutRes = await request('POST', '/api/auth/logout', null, sessionCookie);
     assert(logoutRes.status === 200 && logoutRes.body.success, 'TEST 17: Admin logout succeeds');
@@ -296,6 +454,41 @@ async function runTests() {
       builderScript.raw.includes('clearLocalDraft();') &&
       !builderScript.raw.includes('localStorage.setItem(getLocalDraftKey(), JSON.stringify(payload))'),
       'TEST 20d: Builder auto-saves recovery data locally and clears it only after successful server save'
+    );
+
+    assert(
+      builderPage.raw.includes('id="response-deadline"') &&
+      builderScript.raw.includes('response_deadline: responseDeadline') &&
+      builderScript.raw.includes('toDateTimeLocalValue') &&
+      builderScript.raw.includes('response_deadline: content.response_deadline ||') &&
+      builderPage.raw.includes('Times are saved in UTC and enforced by the server'),
+      'TEST 20e: Builder exposes an optional deadline that remains in local draft recovery'
+    );
+
+    assert(
+      builderPage.raw.includes('id="response-limit-enabled"') &&
+      builderPage.raw.includes('id="response-limit"') &&
+      builderScript.raw.includes('syncResponseLimitFields') &&
+      builderScript.raw.includes('response_limit: responseLimit') &&
+      builderScript.raw.includes('Maximum responses must be a whole number'),
+      'TEST 20f: Builder exposes and validates an optional maximum response limit'
+    );
+
+    const analyticsPage = await request('GET', '/analytics.html');
+    const analyticsScript = await request('GET', '/js/analytics.js');
+    const stylesAsset = await request('GET', '/css/styles.css');
+    assert(
+      analyticsPage.status === 200 &&
+      analyticsScript.status === 200 &&
+      analyticsScript.raw.includes('addChartDownloadButton') &&
+      analyticsScript.raw.includes('downloadChartAsPng') &&
+      analyticsScript.raw.includes('toBlob') &&
+      analyticsScript.raw.includes('buildChartFilename') &&
+      analyticsScript.raw.includes('aria-label') &&
+      stylesAsset.status === 200 &&
+      stylesAsset.raw.includes('.chart-actions') &&
+      stylesAsset.raw.includes('.chart-actions {\n    display: none !important;'),
+      'TEST 20g: Analytics Canvas charts expose accessible PNG downloads with print-hidden controls'
     );
 
     console.log('==============================================');

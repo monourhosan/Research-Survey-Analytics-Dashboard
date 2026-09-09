@@ -7,6 +7,7 @@
  * - High-DPI crisp rendering support (window.devicePixelRatio)
  * - Rule-Based Automated Insight Engine UI presenter
  * - RFC 4180 CSV download trigger
+ * - Native PNG export for rendered Canvas charts
  */
 
 let currentSurveyId = null;
@@ -309,6 +310,7 @@ function renderMultipleChoiceAnalysis(container, q) {
       <canvas id="${canvasId}" class="survey-chart"></canvas>
     </div>
   `;
+  addChartDownloadButton(container, canvasId, q.question_text);
 
   // Draw pure HTML5 Canvas horizontal bar chart
   setTimeout(() => {
@@ -352,6 +354,7 @@ function renderRatingAnalysis(container, q) {
       <canvas id="${canvasId}" class="survey-chart"></canvas>
     </div>
   `;
+  addChartDownloadButton(container, canvasId, q.question_text);
 
   setTimeout(() => {
     const chartData = q.distribution.slice().reverse().map(d => ({
@@ -374,6 +377,7 @@ function renderYesNoAnalysis(container, q) {
       <canvas id="${canvasId}" class="survey-chart"></canvas>
     </div>
   `;
+  addChartDownloadButton(container, canvasId, q.question_text);
 
   setTimeout(() => {
     const chartData = [
@@ -404,6 +408,106 @@ function renderTextAnalysis(container, q) {
   });
 
   container.appendChild(list);
+}
+
+/**
+ * Adds a compact, print-hidden export action only to cards with a real Canvas chart.
+ */
+function addChartDownloadButton(container, canvasId, questionText) {
+  const chartContainer = container.querySelector(`#${canvasId}`)?.closest('.chart-container');
+  if (!chartContainer) return;
+
+  const actions = document.createElement('div');
+  actions.className = 'chart-actions no-print';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-secondary btn-sm';
+  button.textContent = 'Download PNG';
+  button.title = `Download chart for "${questionText}" as PNG`;
+  button.setAttribute('aria-label', button.title);
+  button.addEventListener('click', () => downloadChartAsPng(canvasId, questionText));
+
+  actions.appendChild(button);
+  chartContainer.appendChild(actions);
+}
+
+function sanitizeFilenamePart(value, fallback = 'chart') {
+  const normalized = String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 70);
+  return normalized || fallback;
+}
+
+function buildChartFilename(questionText) {
+  const surveyPart = sanitizeFilenamePart(
+    document.getElementById('survey-title-display')?.textContent,
+    'survey'
+  );
+  const questionPart = sanitizeFilenamePart(questionText, 'chart');
+  const filterPart = currentDateFilters.from || currentDateFilters.to
+    ? `-${currentDateFilters.from || 'start'}-to-${currentDateFilters.to || 'end'}`
+    : '';
+  const filenameBase = `${surveyPart}-${questionPart}${filterPart}`.slice(0, 146);
+  return `${filenameBase}.png`;
+}
+
+function downloadChartAsPng(canvasId, questionText) {
+  const sourceCanvas = document.getElementById(canvasId);
+  if (!sourceCanvas || !sourceCanvas.width || !sourceCanvas.height) {
+    showToast('This chart is not ready to export yet.', 'error');
+    return;
+  }
+
+  try {
+    // Compose onto white so transparent Canvas pixels remain readable in documents.
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = sourceCanvas.width;
+    exportCanvas.height = sourceCanvas.height;
+    const exportContext = exportCanvas.getContext('2d');
+    if (!exportContext) throw new Error('Canvas export context unavailable');
+    exportContext.fillStyle = '#ffffff';
+    exportContext.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+    exportContext.drawImage(sourceCanvas, 0, 0);
+
+    const triggerDownload = blob => {
+      try {
+        if (!blob) throw new Error('PNG encoding returned no data');
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = buildChartFilename(questionText);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('PNG chart downloaded.', 'success');
+      } catch (err) {
+        console.error('Chart PNG encoding error:', err);
+        showToast('Unable to export this chart as PNG.', 'error');
+      }
+    };
+
+    if (typeof exportCanvas.toBlob === 'function') {
+      exportCanvas.toBlob(triggerDownload, 'image/png');
+    } else {
+      const dataUrl = exportCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = buildChartFilename(questionText);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showToast('PNG chart downloaded.', 'success');
+    }
+  } catch (err) {
+    console.error('Chart PNG export error:', err);
+    showToast('Unable to export this chart as PNG.', 'error');
+  }
 }
 
 /**

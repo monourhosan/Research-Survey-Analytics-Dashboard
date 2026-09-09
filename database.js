@@ -207,6 +207,7 @@ async function initDatabase() {
           description TEXT,
           status TEXT DEFAULT 'draft',
           response_deadline TEXT,
+          response_limit INTEGER,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
@@ -216,6 +217,9 @@ async function initDatabase() {
       const surveyColumns = await dbAll('PRAGMA table_info(surveys)');
       if (!surveyColumns.some(column => column.name === 'response_deadline')) {
         db.run('ALTER TABLE surveys ADD COLUMN response_deadline TEXT');
+      }
+      if (!surveyColumns.some(column => column.name === 'response_limit')) {
+        db.run('ALTER TABLE surveys ADD COLUMN response_limit INTEGER');
       }
 
       db.run(`

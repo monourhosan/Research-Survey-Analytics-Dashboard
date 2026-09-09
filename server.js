@@ -102,6 +102,44 @@ function isSurveyExpired(responseDeadline) {
   return Number.isFinite(deadlineMs) && deadlineMs <= Date.now();
 }
 
+const MAX_RESPONSE_LIMIT = 1000000;
+
+function normalizeResponseLimit(value) {
+  if (value === undefined || value === null || value === '') return { value: null };
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > MAX_RESPONSE_LIMIT) {
+    return { error: `Response limit must be a whole number from 1 to ${MAX_RESPONSE_LIMIT.toLocaleString()}.` };
+  }
+  return { value };
+}
+
+function isSurveyResponseLimitReached(responseLimit, responseCount) {
+  return Number.isSafeInteger(responseLimit) && responseLimit > 0 && responseCount >= responseLimit;
+}
+
+async function getSurveyResponseCount(surveyId) {
+  const row = await dbGet('SELECT COUNT(*) AS count FROM responses WHERE survey_id = ?', [surveyId]);
+  return row ? row.count : 0;
+}
+
+function responseLimitReachedPayload(survey, responseCount) {
+  return {
+    id: survey.id,
+    title: survey.title,
+    status: survey.status,
+    response_limit: survey.response_limit,
+    response_count: responseCount,
+    code: 'SURVEY_RESPONSE_LIMIT_REACHED',
+    error: 'This survey has reached its maximum number of responses and is no longer accepting submissions.'
+  };
+}
+
+let responseSubmissionQueue = Promise.resolve();
+function serializeResponseSubmission(task) {
+  const result = responseSubmissionQueue.then(task, task);
+  responseSubmissionQueue = result.catch(() => undefined);
+  return result;
+}
+
 /* ==========================================================================
    1. AUTHENTICATION API
    ========================================================================== */
@@ -202,6 +240,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         s.description, 
         s.status, 
         s.response_deadline,
+        s.response_limit,
         s.created_at,
         COUNT(r.id) AS response_count
       FROM surveys s
@@ -241,6 +280,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
         s.description, 
         s.status, 
         s.response_deadline,
+        s.response_limit,
         s.created_at,
         s.updated_at,
         COUNT(r.id) AS response_count
@@ -262,7 +302,7 @@ app.get('/api/surveys', requireAuth, async (req, res) => {
  */
 app.post('/api/surveys', requireAuth, async (req, res) => {
   try {
-    const { title, description, questions, status, response_deadline } = req.body;
+    const { title, description, questions, status, response_deadline, response_limit } = req.body;
 
     if (!title || title.trim().length === 0) {
       return res.status(400).json({ error: 'Survey title is required' });
@@ -277,6 +317,10 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
     if (normalizedDeadline.error) {
       return res.status(400).json({ error: normalizedDeadline.error });
     }
+    const normalizedLimit = normalizeResponseLimit(response_limit);
+    if (normalizedLimit.error) {
+      return res.status(400).json({ error: normalizedLimit.error });
+    }
 
     if (surveyStatus === 'active' && isSurveyExpired(normalizedDeadline.value)) {
       return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
@@ -289,8 +333,8 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 
     // Insert survey
     const result = await dbRun(
-      'INSERT INTO surveys (title, description, status, response_deadline) VALUES (?, ?, ?, ?)',
-      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value]
+      'INSERT INTO surveys (title, description, status, response_deadline, response_limit) VALUES (?, ?, ?, ?, ?)',
+      [title.trim(), description ? description.trim() : '', surveyStatus, normalizedDeadline.value, normalizedLimit.value]
     );
 
     const surveyId = result.lastID;
@@ -403,14 +447,21 @@ app.put('/api/surveys/:id', requireAuth, async (req, res) => {
     if (normalizedDeadline.error) {
       return res.status(400).json({ error: normalizedDeadline.error });
     }
+    const limitWasProvided = Object.prototype.hasOwnProperty.call(req.body, 'response_limit');
+    const normalizedLimit = limitWasProvided
+      ? normalizeResponseLimit(req.body.response_limit)
+      : { value: existing.response_limit };
+    if (normalizedLimit.error) {
+      return res.status(400).json({ error: normalizedLimit.error });
+    }
 
     if (existing.status === 'active' && isSurveyExpired(normalizedDeadline.value)) {
       return res.status(400).json({ error: 'An active survey response deadline must be in the future.' });
     }
 
     await dbRun(
-      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, surveyId]
+      'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, response_limit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [title.trim(), description ? description.trim() : '', normalizedDeadline.value, normalizedLimit.value, surveyId]
     );
 
     // If questions array passed, sync questions
@@ -619,7 +670,7 @@ app.delete('/api/questions/:id', requireAuth, async (req, res) => {
 app.get('/api/public/surveys/:id', async (req, res) => {
   try {
     const surveyId = parseInt(req.params.id, 10);
-    const survey = await dbGet('SELECT id, title, description, status, response_deadline FROM surveys WHERE id = ?', [surveyId]);
+    const survey = await dbGet('SELECT id, title, description, status, response_deadline, response_limit FROM surveys WHERE id = ?', [surveyId]);
 
     if (!survey) {
       return res.status(404).json({ error: 'Survey not found' });
@@ -651,6 +702,11 @@ app.get('/api/public/surveys/:id', async (req, res) => {
       });
     }
 
+    const responseCount = await getSurveyResponseCount(surveyId);
+    if (isSurveyResponseLimitReached(survey.response_limit, responseCount)) {
+      return res.status(403).json(responseLimitReachedPayload(survey, responseCount));
+    }
+
     const questions = await dbAll(
       `SELECT id, question_text, question_type, options_json, is_required, sort_order 
        FROM questions 
@@ -665,6 +721,8 @@ app.get('/api/public/surveys/:id', async (req, res) => {
       description: survey.description,
       status: survey.status,
       response_deadline: survey.response_deadline,
+      response_limit: survey.response_limit,
+      response_count: responseCount,
       questions: questions.map(q => ({
         id: q.id,
         question_text: q.question_text,
@@ -744,28 +802,73 @@ app.post('/api/public/surveys/:id/responses', async (req, res) => {
       }
     }
 
-    // Insert response record
-    const respResult = await dbRun(
-      'INSERT INTO responses (survey_id) VALUES (?)',
-      [surveyId]
-    );
-    const responseId = respResult.lastID;
+    const submissionResult = await serializeResponseSubmission(async () => {
+      let transactionOpen = false;
+      try {
+        await dbRun('BEGIN IMMEDIATE TRANSACTION');
+        transactionOpen = true;
 
-    // Insert answers
-    for (const q of questions) {
-      const val = answers[q.id];
-      if (val !== undefined && val !== null && String(val).trim().length > 0) {
-        await dbRun(
-          'INSERT INTO answers (response_id, question_id, answer_text) VALUES (?, ?, ?)',
-          [responseId, q.id, String(val).trim()]
-        );
+        const currentSurvey = await dbGet('SELECT * FROM surveys WHERE id = ?', [surveyId]);
+        if (!currentSurvey || currentSurvey.status !== 'active') {
+          await dbRun('ROLLBACK');
+          transactionOpen = false;
+          return { noLongerAccepting: true };
+        }
+
+        if (isSurveyExpired(currentSurvey.response_deadline)) {
+          await dbRun('ROLLBACK');
+          transactionOpen = false;
+          return { expired: true };
+        }
+
+        const responseCount = await getSurveyResponseCount(surveyId);
+        if (isSurveyResponseLimitReached(currentSurvey.response_limit, responseCount)) {
+          await dbRun('ROLLBACK');
+          transactionOpen = false;
+          return { limitReached: true, responseCount, survey: currentSurvey };
+        }
+
+        const respResult = await dbRun('INSERT INTO responses (survey_id) VALUES (?)', [surveyId]);
+        const responseId = respResult.lastID;
+
+        for (const q of questions) {
+          const val = answers[q.id];
+          if (val !== undefined && val !== null && String(val).trim().length > 0) {
+            await dbRun(
+              'INSERT INTO answers (response_id, question_id, answer_text) VALUES (?, ?, ?)',
+              [responseId, q.id, String(val).trim()]
+            );
+          }
+        }
+
+        await dbRun('COMMIT');
+        transactionOpen = false;
+        return { responseId };
+      } catch (err) {
+        if (transactionOpen) {
+          try { await dbRun('ROLLBACK'); } catch (rollbackErr) { console.error('Response transaction rollback error:', rollbackErr); }
+        }
+        throw err;
       }
+    });
+
+    if (submissionResult.limitReached) {
+      return res.status(403).json(responseLimitReachedPayload(submissionResult.survey, submissionResult.responseCount));
+    }
+    if (submissionResult.expired) {
+      return res.status(403).json({
+        code: 'SURVEY_EXPIRED',
+        error: 'This survey response deadline has passed and it is no longer accepting responses.'
+      });
+    }
+    if (submissionResult.noLongerAccepting) {
+      return res.status(403).json({ error: 'This survey is not currently accepting responses' });
     }
 
     return res.status(201).json({
       success: true,
       message: 'Your response has been recorded successfully.',
-      responseId
+      responseId: submissionResult.responseId
     });
   } catch (err) {
     console.error('Submit response error:', err);

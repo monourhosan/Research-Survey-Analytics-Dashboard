@@ -6,133 +6,61 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <title>Admin Login - Research Survey Analytics Dashboard</title>
   <link rel="stylesheet" href="css/styles.css">
-  <style>
-    .login-container {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: radial-gradient(circle at 50% 20%, var(--palette-cream) 0%, #ded7c2 100%);
-    }
-
-    .login-card {
-      background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-lg);
-      padding: 40px;
-      width: 100%;
-      max-width: 440px;
-      box-shadow: var(--shadow-lg);
-    }
-
-    .login-header {
-      text-align: center;
-      margin-bottom: 32px;
-    }
-
-    .login-logo {
-      width: 48px;
-      height: 48px;
-      background: var(--color-primary);
-      color: var(--palette-cream);
-      border-radius: var(--radius-sm);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      font-weight: 800;
-      margin: 0 auto 16px;
-    }
-
-    .login-title {
-      font-size: 22px;
-      font-weight: 700;
-      color: var(--color-primary);
-      line-height: 1.25;
-      margin-bottom: 6px;
-    }
-
-    .login-subtitle {
-      font-size: 13.5px;
-      color: var(--color-text-muted);
-    }
-
-    .demo-credentials-box {
-      margin-top: 24px;
-      padding: 14px;
-      background: var(--color-background);
-      border: 1px dashed var(--color-border);
-      border-radius: var(--radius-sm);
-      font-size: 12.5px;
-      color: var(--color-text-muted);
-    }
-
-    .demo-credentials-box strong {
-      color: var(--color-text);
-    }
-
-    .btn-fill-demo {
-      display: inline-block;
-      margin-top: 8px;
-      color: var(--color-primary);
-      text-decoration: underline;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 12px;
-      border: none;
-      background: none;
-    }
-  </style>
 </head>
-<body>
+<body class="login-page">
   <div class="login-container">
-    <div class="login-card">
-      <div class="login-header">
-        <div class="login-logo">R</div>
-        <h1 class="login-title">Research Survey Analytics Dashboard</h1>
-        <p class="login-subtitle">Sign in to access research survey analytics</p>
+    <section class="login-showcase" aria-label="Research Survey Analytics Dashboard overview">
+      <a class="login-brand" href="/login.html" aria-label="Research Survey Analytics Dashboard home">
+        <span class="login-logo" aria-hidden="true">R</span>
+        <span><strong>Research Survey</strong><small>Analytics Dashboard</small></span>
+      </a>
+      <div class="login-showcase-copy">
+        <span class="eyebrow">Research workspace</span>
+        <h1>Clear survey data,<br>ready for decisions.</h1>
+        <p>Plan questionnaires, collect responses, and turn evidence into understandable research insights.</p>
       </div>
+      <ul class="login-feature-list" aria-label="Application capabilities">
+        <li><span aria-hidden="true">01</span> Build structured research surveys</li>
+        <li><span aria-hidden="true">02</span> Share public response links securely</li>
+        <li><span aria-hidden="true">03</span> Review visual analytics and exports</li>
+      </ul>
+      <p class="login-showcase-note">For authorized research administrators</p>
+    </section>
 
-      <form id="login-form" method="post" action="/api/auth/login">
-        <div class="form-group">
-          <label for="email" class="form-label">Admin Email</label>
-          <input 
-            type="email" 
-            id="email" 
-            name="email" 
-            class="form-input" 
-            placeholder="admin@research.local" 
-            required 
-            autocomplete="email"
-          >
+    <main class="login-panel">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-mobile-brand"><span class="login-logo" aria-hidden="true">R</span><span>Research Survey</span></div>
+          <span class="eyebrow">Administrator access</span>
+          <h2 class="login-title">Welcome back</h2>
+          <p class="login-subtitle">Sign in to manage your research workspace.</p>
         </div>
 
-        <div class="form-group">
-          <label for="password" class="form-label">Password</label>
-          <input 
-            type="password" 
-            id="password" 
-            name="password" 
-            class="form-input" 
-            placeholder="••••••••" 
-            required 
-            autocomplete="current-password"
-          >
+        <form id="login-form" method="post" action="/api/auth/login">
+          <div class="form-group">
+            <label for="email" class="form-label">Admin email</label>
+            <input type="email" id="email" name="email" class="form-input" placeholder="admin@research.local" required autocomplete="email">
+          </div>
+
+          <div class="form-group">
+            <label for="password" class="form-label">Password</label>
+            <input type="password" id="password" name="password" class="form-input" placeholder="Enter your password" required autocomplete="current-password">
+          </div>
+
+          <button type="submit" id="btn-submit-login" class="btn btn-primary login-submit">
+            Sign In <span aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <div class="demo-credentials-box">
+          <div class="demo-credentials-heading"><span aria-hidden="true">◇</span><strong>Defense demonstration access</strong></div>
+          <p>Use the prepared local account during the project defense.</p>
+          <div class="demo-credential-grid"><code>admin@research.local</code><code>Admin123!</code></div>
+          <button type="button" id="btn-autofill" class="btn-fill-demo">Use demonstration credentials <span aria-hidden="true">→</span></button>
         </div>
-
-        <button type="submit" id="btn-submit-login" class="btn btn-primary" style="width: 100%; padding: 11px;">
-          Sign In
-        </button>
-      </form>
-
-      <div class="demo-credentials-box">
-        <div><strong>Demo Credentials (Local Defense Only):</strong></div>
-        <div>Email: <code>admin@research.local</code></div>
-        <div>Password: <code>Admin123!</code></div>
-        <button type="button" id="btn-autofill" class="btn-fill-demo">Auto-fill Demo Credentials</button>
+        <p class="login-security-note"><span aria-hidden="true">◌</span> Protected administrator session</p>
       </div>
-    </div>
+    </main>
   </div>
 
   <div id="toast-container"></div>

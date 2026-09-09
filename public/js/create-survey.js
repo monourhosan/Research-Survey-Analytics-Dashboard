@@ -24,6 +24,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Bind top & bottom buttons
   document.getElementById('btn-add-question').addEventListener('click', () => addQuestion());
+  document.getElementById('btn-preview-survey').addEventListener('click', openSurveyPreview);
+  document.getElementById('btn-preview-survey-bottom').addEventListener('click', openSurveyPreview);
   document.getElementById('btn-save-draft').addEventListener('click', () => submitSurvey('draft'));
   document.getElementById('btn-save-draft-bottom').addEventListener('click', () => submitSurvey('draft'));
   document.getElementById('btn-publish-survey').addEventListener('click', () => submitSurvey('active'));
@@ -260,6 +262,217 @@ function renderOptionsForQuestion(questionIndex) {
     `;
     listContainer.appendChild(row);
   });
+}
+
+function createPreviewElement(tagName, className = '', text = '') {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function getPreviewSurveyData() {
+  const rawTitle = document.getElementById('survey-title').value.trim();
+  const rawDescription = document.getElementById('survey-description').value.trim();
+  const warnings = [];
+
+  if (!rawTitle) warnings.push('Add a survey title before publishing. A placeholder title is shown in this preview.');
+  if (questionsList.length === 0) warnings.push('This survey has no questions yet, so it cannot be published.');
+
+  const questions = questionsList.map((question, index) => {
+    const validOptions = (question.options || [])
+      .map(option => String(option || '').trim())
+      .filter(Boolean);
+
+    if (!String(question.question_text || '').trim()) {
+      warnings.push(`Question ${index + 1} has no question text.`);
+    }
+    if (question.question_type === 'multiple_choice' && validOptions.length < 2) {
+      warnings.push(`Question ${index + 1} needs at least two non-empty multiple-choice options before publishing.`);
+    }
+
+    return {
+      id: question.id || `preview-${index + 1}`,
+      question_text: String(question.question_text || '').trim() || `Question ${index + 1} (draft)`,
+      question_type: question.question_type || 'text',
+      options: validOptions,
+      is_required: Boolean(question.is_required)
+    };
+  });
+
+  return {
+    title: rawTitle || 'Untitled Research Survey',
+    description: rawDescription,
+    questions,
+    warnings: [...new Set(warnings)]
+  };
+}
+
+function addPreviewChoice(parent, name, value, labelText, className = 'choice-item') {
+  const label = createPreviewElement('label', className);
+  const input = document.createElement('input');
+  input.type = 'radio';
+  input.name = name;
+  input.value = value;
+  const text = createPreviewElement('span', '', labelText);
+  label.append(input, text);
+  parent.appendChild(label);
+}
+
+function appendPreviewQuestionControl(card, question, index) {
+  const name = `preview-q-${index + 1}`;
+
+  if (question.question_type === 'rating') {
+    const group = createPreviewElement('div', 'rating-options-group');
+    [1, 2, 3, 4, 5].forEach(value => {
+      const label = createPreviewElement('label', 'rating-option-label');
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = name;
+      input.value = String(value);
+      label.append(input, createPreviewElement('span', '', String(value)));
+      group.appendChild(label);
+    });
+    card.appendChild(group);
+
+    const hint = createPreviewElement('div', 'preview-rating-hint');
+    hint.append(
+      createPreviewElement('span', '', '1 = Very Dissatisfied / Poor'),
+      createPreviewElement('span', '', '5 = Very Satisfied / Excellent')
+    );
+    card.appendChild(hint);
+    return;
+  }
+
+  if (question.question_type === 'multiple_choice') {
+    const group = createPreviewElement('div', 'choice-list');
+    if (question.options.length === 0) {
+      const empty = createPreviewElement('div', 'preview-incomplete-choice', 'No valid answer options have been configured yet.');
+      group.appendChild(empty);
+    } else {
+      question.options.forEach(option => addPreviewChoice(group, name, option, option));
+    }
+    card.appendChild(group);
+    return;
+  }
+
+  if (question.question_type === 'yes_no') {
+    const group = createPreviewElement('div', 'choice-list preview-yes-no');
+    addPreviewChoice(group, name, 'Yes', 'Yes');
+    addPreviewChoice(group, name, 'No', 'No');
+    card.appendChild(group);
+    return;
+  }
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.name = name;
+  input.className = 'form-input';
+  input.placeholder = 'Your answer...';
+  input.maxLength = 1000;
+  card.appendChild(input);
+}
+
+function ensureSurveyPreviewDialog() {
+  let dialog = document.getElementById('survey-preview-dialog');
+  if (dialog) return dialog;
+
+  dialog = document.createElement('dialog');
+  dialog.id = 'survey-preview-dialog';
+  dialog.className = 'custom-modal preview-survey-modal';
+  dialog.setAttribute('aria-labelledby', 'survey-preview-dialog-title');
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
+function openSurveyPreview() {
+  const data = getPreviewSurveyData();
+  const dialog = ensureSurveyPreviewDialog();
+  dialog.replaceChildren();
+
+  const dialogHeader = createPreviewElement('div', 'preview-dialog-header');
+  const headingGroup = document.createElement('div');
+  headingGroup.append(
+    createPreviewElement('p', 'preview-dialog-kicker', 'Survey builder'),
+    createPreviewElement('h2', 'modal-title', 'Survey preview')
+  );
+  headingGroup.lastElementChild.id = 'survey-preview-dialog-title';
+
+  const closeButton = createPreviewElement('button', 'preview-dialog-close', '×');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Close survey preview');
+  dialogHeader.append(headingGroup, closeButton);
+
+  const modeBanner = createPreviewElement('div', 'preview-mode-banner', 'Preview Mode — responses cannot be submitted.');
+  modeBanner.setAttribute('role', 'status');
+  dialog.append(dialogHeader, modeBanner);
+
+  if (data.warnings.length > 0) {
+    const warning = createPreviewElement('div', 'preview-warning');
+    warning.setAttribute('role', 'status');
+    warning.appendChild(createPreviewElement('strong', '', 'Before publishing: '));
+    warning.appendChild(createPreviewElement('span', '', data.warnings.join(' ')));
+    dialog.appendChild(warning);
+  }
+
+  const surveyCard = createPreviewElement('article', 'survey-public-card survey-preview-card');
+  const publicHeader = createPreviewElement('header', 'survey-public-header');
+  publicHeader.appendChild(createPreviewElement('span', 'preview-questionnaire-label', 'Research Questionnaire'));
+  publicHeader.appendChild(createPreviewElement('h1', '', data.title));
+  if (data.description) publicHeader.appendChild(createPreviewElement('p', '', data.description));
+  surveyCard.appendChild(publicHeader);
+
+  const body = createPreviewElement('div', 'survey-public-body');
+  if (data.questions.length === 0) {
+    body.appendChild(createPreviewElement('div', 'empty-state preview-empty-state', 'Add questions in the builder to see the respondent form here.'));
+  } else {
+    data.questions.forEach((question, index) => {
+      const card = createPreviewElement('section', 'respondent-question-card');
+      const questionTitle = createPreviewElement('div', 'respondent-q-title', `${index + 1}. ${question.question_text}`);
+      if (question.is_required) {
+        const required = createPreviewElement('span', 'required-star', '*');
+        required.title = 'Required question';
+        questionTitle.appendChild(required);
+      }
+      card.appendChild(questionTitle);
+      appendPreviewQuestionControl(card, question, index);
+      body.appendChild(card);
+    });
+
+    const consent = createPreviewElement('section', 'consent-panel');
+    consent.append(
+      createPreviewElement('h3', 'consent-title', 'Research participation consent'),
+      createPreviewElement('p', '', 'Participation is voluntary. This preview shows the consent notice respondents will see before submitting.'),
+    );
+    const consentLabel = createPreviewElement('label', 'consent-check');
+    const consentInput = document.createElement('input');
+    consentInput.type = 'checkbox';
+    consentInput.name = 'preview-consent';
+    consentLabel.append(consentInput, createPreviewElement('span', '', 'I understand this notice and consent to submit my response.'));
+    consent.appendChild(consentLabel);
+    body.appendChild(consent);
+
+    const submitButton = createPreviewElement('button', 'btn btn-primary preview-submit-disabled', 'Preview Only — Submission Disabled');
+    submitButton.type = 'button';
+    submitButton.disabled = true;
+    body.appendChild(submitButton);
+  }
+  surveyCard.appendChild(body);
+  dialog.appendChild(surveyCard);
+
+  const footer = createPreviewElement('div', 'modal-actions preview-dialog-actions');
+  const backButton = createPreviewElement('button', 'btn btn-secondary btn-sm', 'Back to editor');
+  backButton.type = 'button';
+  footer.appendChild(backButton);
+  dialog.appendChild(footer);
+
+  const closePreview = () => dialog.close();
+  closeButton.addEventListener('click', closePreview);
+  backButton.addEventListener('click', closePreview);
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) closePreview();
+  }, { once: true });
+  dialog.showModal();
 }
 
 // Validate & Submit Survey

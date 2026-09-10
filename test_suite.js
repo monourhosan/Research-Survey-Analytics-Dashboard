@@ -566,7 +566,23 @@ async function runTests() {
     for (let index = 0; index < 9; index += 1) await request('POST', `/api/public/surveys/${capacityAttention.body.id}/responses`, { answers: { [capacityQuestionId]: 'Yes' } });
     for (let index = 0; index < 2; index += 1) await request('POST', `/api/public/surveys/${targetAttention.body.id}/responses`, { answers: { [targetQuestionId]: 'Yes' } });
 
-    const attentionDashboard = await request('GET', '/api/dashboard?attentionLimit=100', null, sessionCookie);
+    // TEST 23: Upcoming research uses the same active, non-archived survey summary with deterministic planning statuses.
+    const pastUpcoming = await makeAttentionSurvey(`AAA Upcoming past ${now}`, { response_deadline: new Date(Date.now() + 1200).toISOString() });
+    const needsUpcoming = await makeAttentionSurvey(`AAA Upcoming needs ${now}`, { response_deadline: new Date(now + 4 * 24 * 60 * 60 * 1000).toISOString(), target_responses: 20 });
+    const almostUpcoming = await makeAttentionSurvey(`AAA Upcoming almost ${now}`, { target_responses: 10 });
+    const exceededUpcoming = await makeAttentionSurvey(`AAA Upcoming exceeded ${now}`, { target_responses: 1 });
+    const onTrackUpcoming = await makeAttentionSurvey(`AAA Upcoming on track ${now}`, { target_responses: 12 });
+    const archivedUpcoming = await makeAttentionSurvey(`AAA Upcoming archived ${now}`, { status: 'draft', target_responses: 4 });
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    const almostPublic = await request('GET', `/api/public/surveys/${almostUpcoming.body.id}`);
+    const exceededPublic = await request('GET', `/api/public/surveys/${exceededUpcoming.body.id}`);
+    const almostQuestionId = almostPublic.body.questions[0].id;
+    const exceededQuestionId = exceededPublic.body.questions[0].id;
+    for (let index = 0; index < 9; index += 1) await request('POST', `/api/public/surveys/${almostUpcoming.body.id}/responses`, { answers: { [almostQuestionId]: 'Yes' } });
+    for (let index = 0; index < 2; index += 1) await request('POST', `/api/public/surveys/${exceededUpcoming.body.id}/responses`, { answers: { [exceededQuestionId]: 'Yes' } });
+    const archivedUpcomingResult = await request('POST', `/api/surveys/${archivedUpcoming.body.id}/archive`, {}, sessionCookie);
+
+    const attentionDashboard = await request('GET', '/api/dashboard?attentionLimit=100&upcomingLimit=100', null, sessionCookie);
     const attentionItems = attentionDashboard.body.attentionItems || [];
     const hasAttention = (surveyId, type) => attentionItems.some(item => item.surveyId === surveyId && item.type === type);
     const ranks = { critical: 0, high: 1, warning: 2, success: 3 };
@@ -582,6 +598,37 @@ async function runTests() {
       attentionDashboard.body.responseActivity && attentionDashboard.body.responseActivity.rangeDays === 7 &&
       stableOrder,
       'TEST 22: Dashboard attention payload remains intact alongside response activity data'
+    );
+
+    const upcomingResearch = attentionDashboard.body.upcomingResearch || [];
+    const upcomingFor = surveyId => upcomingResearch.find(item => item.surveyId === surveyId);
+    const upcomingGroup = item => item.status === 'deadline_passed' ? 0 : item.deadline ? 1 : 2;
+    const upcomingOrderIsStable = upcomingResearch.every((item, index) => {
+      if (!index) return true;
+      const previous = upcomingResearch[index - 1];
+      const groupDifference = upcomingGroup(previous) - upcomingGroup(item);
+      if (groupDifference !== 0) return groupDifference <= 0;
+      if (upcomingGroup(item) === 1) return Date.parse(previous.deadline) <= Date.parse(item.deadline);
+      if (upcomingGroup(item) === 2) return (previous.progressPercent ?? Infinity) <= (item.progressPercent ?? Infinity);
+      return true;
+    });
+    const pastItem = upcomingFor(pastUpcoming.body.id);
+    const needsItem = upcomingFor(needsUpcoming.body.id);
+    const almostItem = upcomingFor(almostUpcoming.body.id);
+    const exceededItem = upcomingFor(exceededUpcoming.body.id);
+    const onTrackItem = upcomingFor(onTrackUpcoming.body.id);
+    const collectingItem = upcomingFor(approachingAttention.body.id);
+    assert(
+      archivedUpcomingResult.status === 200 &&
+      pastItem && pastItem.status === 'deadline_passed' && pastItem.daysRemaining === 0 &&
+      needsItem && needsItem.status === 'needs_attention' && needsItem.progressPercent === 0 &&
+      almostItem && almostItem.status === 'almost_there' && almostItem.progressPercent === 90 &&
+      exceededItem && exceededItem.status === 'target_reached' && exceededItem.responseCount === 2 && exceededItem.progressPercent === 100 &&
+      onTrackItem && onTrackItem.status === 'on_track' && onTrackItem.progressPercent === 0 &&
+      collectingItem && collectingItem.status === 'collecting' && collectingItem.progressPercent === null &&
+      !upcomingFor(archivedUpcoming.body.id) && upcomingOrderIsStable,
+      'TEST 23: Upcoming research has capped target progress, deterministic statuses, ordering, and active/non-archived exclusion',
+      JSON.stringify({ pastItem, needsItem, almostItem, exceededItem, onTrackItem, collectingItem, archivedStatus: archivedUpcomingResult.status, upcomingOrderIsStable })
     );
 
     // TEST 17: Does logout work?
@@ -617,9 +664,10 @@ async function runTests() {
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
       dashboardPage.raw.includes('Response Activity') && dashboardPage.raw.includes('response-activity-chart') &&
+      dashboardPage.raw.includes('Upcoming Research') && dashboardPage.raw.includes('upcoming-research-list') &&
       dashboardScript.status === 200 && dashboardScript.raw.includes('renderAttentionItems') &&
-      dashboardScript.raw.includes('drawResponseActivityChart') && dashboardScript.raw.includes('AbortController'),
-      'TEST 20b1: Dashboard attention and response activity panel assets load'
+      dashboardScript.raw.includes('drawResponseActivityChart') && dashboardScript.raw.includes('renderUpcomingResearch') && dashboardScript.raw.includes('AbortController'),
+      'TEST 20b1: Dashboard attention, response activity, and upcoming-research panel assets load'
     );
 
     const builderPage = await request('GET', '/create-survey.html');

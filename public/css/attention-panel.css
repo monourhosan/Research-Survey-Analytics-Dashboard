@@ -28,3 +28,30 @@
   .attention-item { grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 10px; }
   .attention-action { grid-column: 2; justify-self: start; margin-top: -2px; }
 }
+
+/* Response Activity dashboard chart */
+.dashboard-activity-card { margin: 0 0 19px; overflow: hidden; border-radius: 16px; }
+.dashboard-activity-header { align-items: flex-end; gap: 18px; padding: 20px 22px; }
+.dashboard-activity-header .card-title { margin-top: 1px; font-size: 18px; letter-spacing: -.025em; }
+.dashboard-activity-header .card-subtitle { margin-top: 4px; }
+.activity-range-controls { display: inline-flex; flex: 0 0 auto; gap: 5px; padding: 4px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-secondary); }
+.activity-range-button { min-height: 30px; padding: 5px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--color-text-muted); cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
+.activity-range-button:hover, .activity-range-button:focus-visible { color: var(--color-text); background: var(--color-surface); }
+.activity-range-button.is-active { background: var(--color-primary); color: var(--palette-cream); }
+.dashboard-activity-body { padding: 18px 22px 15px; }
+.activity-stat-row { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
+.activity-stat-row > div:first-child { display: flex; align-items: baseline; gap: 7px; }
+.activity-stat-row strong { color: var(--color-primary); font-size: 27px; letter-spacing: -.055em; line-height: 1; }
+.activity-stat-row span, .activity-growth, .response-activity-status { color: var(--color-text-muted); font-size: 11px; font-weight: 700; }
+.activity-growth.is-positive { color: #2f6b47; }
+.activity-growth.is-negative { color: #9f1f1f; }
+.response-activity-chart-wrap { width: 100%; min-height: 220px; border: 1px solid var(--color-border); border-radius: 11px; background: var(--color-surface-secondary); overflow: hidden; }
+#response-activity-chart { display: block; width: 100%; }
+.response-activity-status { min-height: 17px; margin: 9px 0 0; line-height: 1.4; }
+
+@media (max-width: 620px) {
+  .dashboard-activity-header { align-items: flex-start; flex-direction: column; padding: 18px; }
+  .dashboard-activity-body { padding: 16px 18px 14px; }
+  .activity-stat-row { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .activity-stat-row > div:first-child { align-items: flex-start; flex-direction: column; gap: 4px; }
+}

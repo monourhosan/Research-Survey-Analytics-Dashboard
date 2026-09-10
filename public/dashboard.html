@@ -104,6 +104,20 @@
           </article>
         </section>
 
+        <section class="card dashboard-attention-card" aria-labelledby="attention-required-title">
+          <div class="card-header dashboard-attention-header">
+            <div>
+              <span class="page-kicker">Research follow-up</span>
+              <h2 class="card-title" id="attention-required-title">Attention Required</h2>
+              <p class="card-subtitle">Prioritized survey actions based on deadlines, collection goals, capacity, and draft readiness.</p>
+            </div>
+            <span id="attention-required-count" class="attention-count" aria-live="polite" aria-label="0 surveys need attention">0</span>
+          </div>
+          <div id="attention-required-list" class="attention-list" aria-live="polite" aria-busy="true">
+            <div class="attention-empty-state">Loading survey attention items…</div>
+          </div>
+        </section>
+
         <!-- Recent Surveys Card -->
         <section class="card dashboard-recent-card">
           <div class="card-header">

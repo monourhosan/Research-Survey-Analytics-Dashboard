@@ -349,6 +349,62 @@ function buildAttentionItems(surveys, questionsBySurvey, nowMs = Date.now()) {
   });
 }
 
+function buildUpcomingResearch(surveys, nowMs = Date.now(), limit = 5) {
+  const items = surveys
+    .filter(survey => survey.status === 'active' && !survey.is_archived)
+    .filter(survey => survey.response_deadline || Number.isSafeInteger(survey.target_responses))
+    .map(survey => {
+      const responseCount = Number(survey.response_count || 0);
+      const targetResponses = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+      const deadline = survey.response_deadline || null;
+      const deadlineMs = Date.parse(deadline || '');
+      const hasDeadline = Number.isFinite(deadlineMs);
+      const deadlinePassed = hasDeadline && deadlineMs <= nowMs;
+      const daysRemaining = hasDeadline ? calculateDaysRemaining(deadline, nowMs) : null;
+      const progressPercent = targetResponses
+        ? Number(Math.min(100, (responseCount / targetResponses) * 100).toFixed(1))
+        : null;
+
+      let status = 'collecting';
+      if (deadlinePassed) status = 'deadline_passed';
+      else if (targetResponses && responseCount >= targetResponses) status = 'target_reached';
+      else if (targetResponses && hasDeadline && daysRemaining <= ATTENTION_BEHIND_TARGET_DAYS && progressPercent < 75) status = 'needs_attention';
+      else if (targetResponses && progressPercent >= 90) status = 'almost_there';
+      else if (targetResponses) status = 'on_track';
+
+      return {
+        surveyId: survey.id,
+        title: survey.title,
+        responseCount,
+        targetResponses,
+        progressPercent,
+        deadline,
+        daysRemaining,
+        status
+      };
+    });
+
+  const groupFor = item => {
+    if (item.status === 'deadline_passed') return 0;
+    if (item.deadline) return 1;
+    return 2;
+  };
+  return items.sort((a, b) => {
+    const groupDifference = groupFor(a) - groupFor(b);
+    if (groupDifference) return groupDifference;
+    if (groupFor(a) === 1) {
+      const deadlineDifference = Date.parse(a.deadline) - Date.parse(b.deadline);
+      if (deadlineDifference) return deadlineDifference;
+    }
+    if (groupFor(a) === 2) {
+      const progressDifference = (a.progressPercent ?? Number.POSITIVE_INFINITY) - (b.progressPercent ?? Number.POSITIVE_INFINITY);
+      if (progressDifference) return progressDifference;
+    }
+    const titleDifference = a.title.localeCompare(b.title);
+    return titleDifference || a.surveyId - b.surveyId;
+  }).slice(0, limit);
+}
+
 async function getSurveyResponseCount(surveyId) {
   const row = await dbGet('SELECT COUNT(*) AS count FROM responses WHERE survey_id = ?', [surveyId]);
   return row ? row.count : 0;
@@ -462,6 +518,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const requestedAttentionLimit = parsePositiveId(req.query.attentionLimit);
     const attentionLimit = requestedAttentionLimit ? Math.min(requestedAttentionLimit, 100) : ATTENTION_ITEM_LIMIT;
+    const requestedUpcomingLimit = parsePositiveId(req.query.upcomingLimit);
+    const upcomingLimit = requestedUpcomingLimit ? Math.min(requestedUpcomingLimit, 100) : 5;
     const requestedRange = Number.parseInt(req.query.range, 10);
     const responseActivityRange = RESPONSE_ACTIVITY_RANGES.has(requestedRange) ? requestedRange : 7;
     const totalSurveysRow = await dbGet('SELECT COUNT(*) AS count FROM surveys');
@@ -489,7 +547,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     `);
 
     const attentionSurveys = await dbAll(`
-      SELECT s.id, s.title, s.status, s.response_deadline, s.response_limit, s.target_responses,
+      SELECT s.id, s.title, s.status, s.is_archived, s.response_deadline, s.response_limit, s.target_responses,
         COUNT(r.id) AS response_count
       FROM surveys s
       LEFT JOIN responses r ON s.id = r.survey_id
@@ -508,6 +566,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       questionsBySurvey.set(question.survey_id, questions);
     });
     const allAttentionItems = buildAttentionItems(attentionSurveys, questionsBySurvey);
+    const upcomingResearch = buildUpcomingResearch(attentionSurveys, Date.now(), upcomingLimit);
     const responseActivity = await buildResponseActivity(responseActivityRange);
 
     return res.json({
@@ -518,6 +577,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       recentSurveys,
       attentionItems: allAttentionItems.slice(0, attentionLimit),
       totalAttentionItems: allAttentionItems.length,
+      upcomingResearch,
       responseActivity
     });
   } catch (err) {

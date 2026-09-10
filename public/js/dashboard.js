@@ -3,18 +3,44 @@
  * Dashboard Overview Controller
  */
 
+let selectedActivityRange = 7;
+let dashboardRequestController = null;
+let latestResponseActivity = null;
+let activityResizeFrame = null;
+
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
   if (!user) return;
 
+  document.querySelectorAll('[data-activity-range]').forEach(button => {
+    button.addEventListener('click', () => {
+      const range = Number(button.dataset.activityRange);
+      if (!Number.isSafeInteger(range) || range === selectedActivityRange) return;
+      selectedActivityRange = range;
+      syncActivityRangeControls();
+      loadDashboardData();
+    });
+  });
+  window.addEventListener('resize', () => {
+    if (!latestResponseActivity || activityResizeFrame) return;
+    activityResizeFrame = window.requestAnimationFrame(() => {
+      activityResizeFrame = null;
+      drawResponseActivityChart(latestResponseActivity);
+    });
+  });
   loadDashboardData();
 });
 
 async function loadDashboardData() {
   const tbody = document.getElementById('recent-surveys-tbody');
+  const activityStatus = document.getElementById('response-activity-status');
+  if (dashboardRequestController) dashboardRequestController.abort();
+  dashboardRequestController = new AbortController();
+  const requestController = dashboardRequestController;
+  activityStatus.textContent = 'Loading activity data…';
 
   try {
-    const res = await fetch('/api/dashboard');
+    const res = await fetch(`/api/dashboard?range=${selectedActivityRange}`, { signal: requestController.signal });
     if (!res.ok) throw new Error('Failed to load dashboard data');
 
     const data = await res.json();
@@ -25,6 +51,7 @@ async function loadDashboardData() {
     document.getElementById('stat-closed-surveys').textContent = data.closedSurveys || 0;
     document.getElementById('stat-total-responses').textContent = data.totalResponses || 0;
     renderAttentionItems(data.attentionItems || [], data.totalAttentionItems || 0);
+    renderResponseActivity(data.responseActivity);
 
     // Render Recent Surveys
     if (!data.recentSurveys || data.recentSurveys.length === 0) {
@@ -85,6 +112,7 @@ async function loadDashboardData() {
       tbody.appendChild(tr);
     });
   } catch (err) {
+    if (err.name === 'AbortError') return;
     console.error('Dashboard load error:', err);
     tbody.innerHTML = `
       <tr>
@@ -95,8 +123,138 @@ async function loadDashboardData() {
       </tr>
     `;
     renderAttentionError();
+    renderResponseActivityError();
     showToast('Failed to load dashboard metrics', 'error');
   }
+}
+
+function syncActivityRangeControls() {
+  document.querySelectorAll('[data-activity-range]').forEach(button => {
+    const isActive = Number(button.dataset.activityRange) === selectedActivityRange;
+    button.classList.toggle('is-active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
+}
+
+function formatActivityDate(date) {
+  return new Date(`${date}T00:00:00.000Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function renderResponseActivity(activity) {
+  const total = document.getElementById('response-activity-total');
+  const growth = document.getElementById('response-activity-growth');
+  const summary = document.getElementById('response-activity-summary');
+  const status = document.getElementById('response-activity-status');
+  if (!activity || !Array.isArray(activity.points)) {
+    renderResponseActivityError();
+    return;
+  }
+
+  latestResponseActivity = activity;
+  total.textContent = activity.currentTotal || 0;
+  summary.textContent = `${activity.currentTotal || 0} accepted responses across the last ${activity.rangeDays} days.`;
+  if (activity.previousTotal === 0 && activity.currentTotal > 0) {
+    growth.textContent = 'New activity compared with the previous period';
+    growth.className = 'activity-growth is-positive';
+  } else if (activity.growthPercent === null || activity.growthPercent === undefined) {
+    growth.textContent = 'No change from the previous period';
+    growth.className = 'activity-growth';
+  } else {
+    const prefix = activity.growthPercent > 0 ? '+' : '';
+    growth.textContent = `${prefix}${activity.growthPercent}% vs previous ${activity.rangeDays} days`;
+    growth.className = `activity-growth ${activity.growthPercent > 0 ? 'is-positive' : activity.growthPercent < 0 ? 'is-negative' : ''}`;
+  }
+  status.textContent = activity.currentTotal ? `Daily counts shown from ${formatActivityDate(activity.points[0].date)} to ${formatActivityDate(activity.points[activity.points.length - 1].date)}.` : `No accepted responses in the last ${activity.rangeDays} days.`;
+  drawResponseActivityChart(activity);
+}
+
+function renderResponseActivityError() {
+  latestResponseActivity = null;
+  document.getElementById('response-activity-summary').textContent = 'Response activity is currently unavailable.';
+  document.getElementById('response-activity-growth').textContent = 'Try refreshing the dashboard.';
+  document.getElementById('response-activity-status').textContent = 'Activity data could not be loaded.';
+  const canvas = document.getElementById('response-activity-chart');
+  canvas.setAttribute('aria-label', 'Response activity chart unavailable. Refresh the dashboard to try again.');
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawResponseActivityChart(activity) {
+  const canvas = document.getElementById('response-activity-chart');
+  const context = canvas.getContext('2d');
+  const points = activity.points || [];
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.parentElement.clientWidth || 640;
+  const height = 220;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const padding = { top: 18, right: 14, bottom: 35, left: 34 };
+  const chartWidth = Math.max(1, width - padding.left - padding.right);
+  const chartHeight = Math.max(1, height - padding.top - padding.bottom);
+  const maxCount = Math.max(1, ...points.map(point => Number(point.count || 0)));
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#cccccc';
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#555555';
+  const lineColor = getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim() || '#181818';
+
+  context.font = '11px system-ui, sans-serif';
+  context.fillStyle = textColor;
+  context.strokeStyle = gridColor;
+  context.lineWidth = 1;
+  for (let tick = 0; tick <= 3; tick += 1) {
+    const y = padding.top + (chartHeight / 3) * tick;
+    context.beginPath();
+    context.moveTo(padding.left, y);
+    context.lineTo(width - padding.right, y);
+    context.stroke();
+    context.fillText(String(Math.round(maxCount - (maxCount / 3) * tick)), 2, y + 4);
+  }
+
+  if (!points.length) return;
+  const step = points.length === 1 ? 0 : chartWidth / (points.length - 1);
+  const pointAt = (point, index) => ({
+    x: padding.left + step * index,
+    y: padding.top + chartHeight - ((Number(point.count || 0) / maxCount) * chartHeight)
+  });
+  context.beginPath();
+  points.forEach((point, index) => {
+    const { x, y } = pointAt(point, index);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+  context.lineTo(padding.left, padding.top + chartHeight);
+  context.closePath();
+  context.fillStyle = 'rgba(24, 24, 24, 0.10)';
+  context.fill();
+
+  context.beginPath();
+  points.forEach((point, index) => {
+    const { x, y } = pointAt(point, index);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.strokeStyle = lineColor;
+  context.lineWidth = 2;
+  context.stroke();
+  const labelStep = Math.max(1, Math.ceil(points.length / (width < 480 ? 3 : 6)));
+  points.forEach((point, index) => {
+    const { x, y } = pointAt(point, index);
+    context.fillStyle = lineColor;
+    context.beginPath();
+    context.arc(x, y, 3, 0, Math.PI * 2);
+    context.fill();
+    if (index % labelStep === 0 || index === points.length - 1) {
+      context.fillStyle = textColor;
+      context.textAlign = index === 0 ? 'left' : index === points.length - 1 ? 'right' : 'center';
+      context.fillText(formatActivityDate(point.date), x, height - 11);
+    }
+  });
+  canvas.setAttribute('aria-label', `Response activity chart for the last ${activity.rangeDays} days: ${activity.currentTotal} accepted responses. Daily counts range from zero to ${maxCount}.`);
 }
 
 function attentionActionFor(item) {

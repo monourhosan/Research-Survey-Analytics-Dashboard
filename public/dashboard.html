@@ -6,7 +6,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <title>Dashboard - Research Survey Analytics Dashboard</title>
   <link rel="stylesheet" href="css/styles.css">
-    <link rel="stylesheet" href="css/attention-panel.css">
+  <link rel="stylesheet" href="css/attention-panel.css">
 </head>
 <body class="admin-page">
   <div class="app-container">
@@ -103,6 +103,31 @@
             <div class="metric-value" id="stat-total-responses">0</div>
             <div class="metric-meta">Total respondent submissions</div>
           </article>
+        </section>
+
+        <section class="card dashboard-activity-card" aria-labelledby="response-activity-title">
+          <div class="card-header dashboard-activity-header">
+            <div>
+              <span class="page-kicker">Collection pulse</span>
+              <h2 class="card-title" id="response-activity-title">Response Activity</h2>
+              <p class="card-subtitle" id="response-activity-summary" aria-live="polite">Loading response activity…</p>
+            </div>
+            <div class="activity-range-controls" aria-label="Response activity date range">
+              <button type="button" class="activity-range-button is-active" data-activity-range="7" aria-pressed="true">7 Days</button>
+              <button type="button" class="activity-range-button" data-activity-range="30" aria-pressed="false">30 Days</button>
+              <button type="button" class="activity-range-button" data-activity-range="90" aria-pressed="false">90 Days</button>
+            </div>
+          </div>
+          <div class="dashboard-activity-body">
+            <div class="activity-stat-row">
+              <div><strong id="response-activity-total">0</strong><span>responses in selected range</span></div>
+              <div id="response-activity-growth" class="activity-growth">Calculating trend…</div>
+            </div>
+            <div class="response-activity-chart-wrap">
+              <canvas id="response-activity-chart" role="img" aria-label="Response activity chart. Loading daily response counts."></canvas>
+            </div>
+            <p id="response-activity-status" class="response-activity-status" aria-live="polite"></p>
+          </div>
         </section>
 
         <section class="card dashboard-attention-card" aria-labelledby="attention-required-title">

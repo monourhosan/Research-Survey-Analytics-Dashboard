@@ -51,6 +51,7 @@ async function loadDashboardData() {
     document.getElementById('stat-closed-surveys').textContent = data.closedSurveys || 0;
     document.getElementById('stat-total-responses').textContent = data.totalResponses || 0;
     renderAttentionItems(data.attentionItems || [], data.totalAttentionItems || 0);
+    renderUpcomingResearch(data.upcomingResearch || []);
     renderResponseActivity(data.responseActivity);
 
     // Render Recent Surveys
@@ -123,6 +124,7 @@ async function loadDashboardData() {
       </tr>
     `;
     renderAttentionError();
+    renderUpcomingResearchError();
     renderResponseActivityError();
     showToast('Failed to load dashboard metrics', 'error');
   }
@@ -255,6 +257,70 @@ function drawResponseActivityChart(activity) {
     }
   });
   canvas.setAttribute('aria-label', `Response activity chart for the last ${activity.rangeDays} days: ${activity.currentTotal} accepted responses. Daily counts range from zero to ${maxCount}.`);
+}
+
+function upcomingStatusLabel(status) {
+  return ({
+    target_reached: 'Target reached',
+    deadline_passed: 'Deadline passed',
+    needs_attention: 'Needs attention',
+    almost_there: 'Almost there',
+    on_track: 'On track',
+    collecting: 'Collecting'
+  })[status] || 'Collecting';
+}
+
+function formatUpcomingDeadline(deadline) {
+  return new Date(deadline).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'
+  });
+}
+
+function upcomingDeadlineText(item) {
+  if (!item.deadline) return '';
+  if (item.status === 'deadline_passed') return `Deadline passed · ${formatUpcomingDeadline(item.deadline)}`;
+  const days = Number(item.daysRemaining || 0);
+  return `${formatUpcomingDeadline(item.deadline)} · ${days} day${days === 1 ? '' : 's'} remaining`;
+}
+
+function renderUpcomingResearch(items) {
+  const list = document.getElementById('upcoming-research-list');
+  list.setAttribute('aria-busy', 'false');
+  if (!items.length) {
+    list.innerHTML = '<div class="upcoming-empty-state"><strong>No active studies with deadlines or targets</strong><span>Add a response deadline or target in a survey’s settings to plan collection here.</span></div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  items.forEach(item => {
+    const row = document.createElement('article');
+    row.className = 'upcoming-research-item';
+    const hasTarget = Number.isSafeInteger(item.targetResponses) && item.targetResponses > 0;
+    const responseCount = Number(item.responseCount || 0);
+    const progress = hasTarget ? Math.max(0, Math.min(100, Number(item.progressPercent || 0))) : null;
+    const summary = hasTarget
+      ? `${responseCount} / ${item.targetResponses} responses · ${progress}% toward target`
+      : `${responseCount} accepted response${responseCount === 1 ? '' : 's'}`;
+    row.innerHTML = `
+      <div class="upcoming-research-main">
+        <div class="upcoming-research-title-row">
+          <h3>${escapeHtml(item.title)}</h3>
+          <span class="upcoming-status upcoming-status-${escapeHtml(item.status || 'collecting')}">${escapeHtml(upcomingStatusLabel(item.status))}</span>
+        </div>
+        <p class="upcoming-research-summary">${escapeHtml(summary)}</p>
+        ${hasTarget ? `<div class="upcoming-progress-wrap"><progress value="${progress}" max="100" aria-label="${escapeHtml(item.title)} is ${progress}% toward its response target"></progress><span>${progress}%</span></div>` : ''}
+        ${item.deadline ? `<p class="upcoming-deadline">${escapeHtml(upcomingDeadlineText(item))}</p>` : ''}
+      </div>
+      <a class="btn btn-secondary btn-sm upcoming-research-action" href="analytics.html?id=${encodeURIComponent(item.surveyId)}">Analytics <span aria-hidden="true">→</span></a>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function renderUpcomingResearchError() {
+  const list = document.getElementById('upcoming-research-list');
+  list.setAttribute('aria-busy', 'false');
+  list.innerHTML = '<div class="upcoming-empty-state">Upcoming study details could not be loaded. Refresh the dashboard to try again.</div>';
 }
 
 function attentionActionFor(item) {

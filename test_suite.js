@@ -89,6 +89,21 @@ async function runTests() {
     const authCheck = await request('GET', '/api/dashboard', null, sessionCookie);
     assert(authCheck.status === 200 && authCheck.body.totalSurveys >= 1, 'TEST 18b: Authenticated dashboard returns valid metrics');
 
+    // TEST 18c: Global response activity uses bounded, UTC calendar-day ranges.
+    const activityResponses = await Promise.all([7, 30, 90].map(range => request('GET', `/api/dashboard?range=${range}`, null, sessionCookie)));
+    const activityRangesAreValid = activityResponses.every((response, index) => {
+      const activity = response.body.responseActivity;
+      return response.status === 200 && activity && activity.rangeDays === [7, 30, 90][index] &&
+        activity.points.length === activity.rangeDays &&
+        activity.points.every(point => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isInteger(point.count) && point.count >= 0) &&
+        activity.currentTotal === activity.points.reduce((sum, point) => sum + point.count, 0) &&
+        (activity.previousTotal === 0 ? activity.growthPercent === null : activity.growthPercent === Number((((activity.currentTotal - activity.previousTotal) / activity.previousTotal) * 100).toFixed(1)));
+    });
+    assert(activityRangesAreValid && activityResponses[1].body.responseActivity.points.some(point => point.count === 0), 'TEST 18c: Dashboard activity supports 7/30/90 ranges, zero-filled days, previous totals, and safe growth');
+
+    const invalidActivityRange = await request('GET', '/api/dashboard?range=14', null, sessionCookie);
+    assert(invalidActivityRange.status === 200 && invalidActivityRange.body.responseActivity.rangeDays === 7, 'TEST 18d: Invalid dashboard activity range safely falls back to 7 days');
+
     // TEST 3 & 4: Create survey with questions
     const newSurveyPayload = {
       title: 'Automated Test Evaluation Study',
@@ -564,8 +579,9 @@ async function runTests() {
       hasAttention(targetAttention.body.id, 'target_achieved') &&
       hasAttention(draftAttention.body.id, 'draft_not_ready') &&
       !attentionItems.some(item => item.surveyId === neutralAttention.body.id) &&
+      attentionDashboard.body.responseActivity && attentionDashboard.body.responseActivity.rangeDays === 7 &&
       stableOrder,
-      'TEST 22: Dashboard attention rules cover approaching deadlines, targets, capacity, drafts, no-false-warning, and stable severity ordering'
+      'TEST 22: Dashboard attention payload remains intact alongside response activity data'
     );
 
     // TEST 17: Does logout work?
@@ -600,8 +616,10 @@ async function runTests() {
     const dashboardScript = await request('GET', '/js/dashboard.js');
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
-      dashboardScript.status === 200 && dashboardScript.raw.includes('renderAttentionItems'),
-      'TEST 20b1: Dashboard Attention Required panel assets load'
+      dashboardPage.raw.includes('Response Activity') && dashboardPage.raw.includes('response-activity-chart') &&
+      dashboardScript.status === 200 && dashboardScript.raw.includes('renderAttentionItems') &&
+      dashboardScript.raw.includes('drawResponseActivityChart') && dashboardScript.raw.includes('AbortController'),
+      'TEST 20b1: Dashboard attention and response activity panel assets load'
     );
 
     const builderPage = await request('GET', '/create-survey.html');

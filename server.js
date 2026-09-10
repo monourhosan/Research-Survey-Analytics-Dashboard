@@ -222,11 +222,65 @@ const ATTENTION_BEHIND_TARGET_DAYS = 7;
 const ATTENTION_CAPACITY_WARNING_PERCENT = 90;
 const ATTENTION_ITEM_LIMIT = 5;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const RESPONSE_ACTIVITY_RANGES = new Set([7, 30, 90]);
 
 function calculateDaysRemaining(deadline, nowMs) {
   const deadlineMs = Date.parse(deadline || '');
   if (!Number.isFinite(deadlineMs)) return null;
   return Math.max(0, Math.ceil((deadlineMs - nowMs) / DAY_IN_MS));
+}
+
+function toUtcDateKey(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function getResponseActivityWindow(rangeDays, now = new Date()) {
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const currentStart = addUtcDays(today, -(rangeDays - 1));
+  const currentEnd = addUtcDays(today, 1);
+  const previousStart = addUtcDays(currentStart, -rangeDays);
+  return { currentStart, currentEnd, previousStart };
+}
+
+async function buildResponseActivity(rangeDays, now = new Date()) {
+  const { currentStart, currentEnd, previousStart } = getResponseActivityWindow(rangeDays, now);
+  const currentStartKey = `${toUtcDateKey(currentStart)} 00:00:00`;
+  const currentEndKey = `${toUtcDateKey(currentEnd)} 00:00:00`;
+  const previousStartKey = `${toUtcDateKey(previousStart)} 00:00:00`;
+  const rows = await dbAll(`
+    SELECT substr(submitted_at, 1, 10) AS date, COUNT(*) AS count
+    FROM responses
+    WHERE submitted_at >= ? AND submitted_at < ?
+    GROUP BY substr(submitted_at, 1, 10)
+  `, [previousStartKey, currentEndKey]);
+  const countsByDate = new Map(rows.map(row => [row.date, Number(row.count || 0)]));
+  const points = [];
+  let currentTotal = 0;
+  let previousTotal = 0;
+
+  for (let offset = 0; offset < rangeDays * 2; offset += 1) {
+    const date = addUtcDays(previousStart, offset);
+    const count = countsByDate.get(toUtcDateKey(date)) || 0;
+    if (offset < rangeDays) previousTotal += count;
+    else {
+      currentTotal += count;
+      points.push({ date: toUtcDateKey(date), count });
+    }
+  }
+
+  return {
+    rangeDays,
+    currentTotal,
+    previousTotal,
+    growthPercent: previousTotal > 0 ? Number((((currentTotal - previousTotal) / previousTotal) * 100).toFixed(1)) : null,
+    points
+  };
 }
 
 function buildAttentionItems(surveys, questionsBySurvey, nowMs = Date.now()) {
@@ -408,6 +462,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const requestedAttentionLimit = parsePositiveId(req.query.attentionLimit);
     const attentionLimit = requestedAttentionLimit ? Math.min(requestedAttentionLimit, 100) : ATTENTION_ITEM_LIMIT;
+    const requestedRange = Number.parseInt(req.query.range, 10);
+    const responseActivityRange = RESPONSE_ACTIVITY_RANGES.has(requestedRange) ? requestedRange : 7;
     const totalSurveysRow = await dbGet('SELECT COUNT(*) AS count FROM surveys');
     const activeSurveysRow = await dbGet("SELECT COUNT(*) AS count FROM surveys WHERE status = 'active'");
     const closedSurveysRow = await dbGet("SELECT COUNT(*) AS count FROM surveys WHERE status = 'closed'");
@@ -452,6 +508,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       questionsBySurvey.set(question.survey_id, questions);
     });
     const allAttentionItems = buildAttentionItems(attentionSurveys, questionsBySurvey);
+    const responseActivity = await buildResponseActivity(responseActivityRange);
 
     return res.json({
       totalSurveys: totalSurveysRow ? totalSurveysRow.count : 0,
@@ -460,7 +517,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       totalResponses: totalResponsesRow ? totalResponsesRow.count : 0,
       recentSurveys,
       attentionItems: allAttentionItems.slice(0, attentionLimit),
-      totalAttentionItems: allAttentionItems.length
+      totalAttentionItems: allAttentionItems.length,
+      responseActivity
     });
   } catch (err) {
     console.error('Dashboard error:', err);

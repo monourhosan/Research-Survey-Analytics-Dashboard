@@ -217,6 +217,84 @@ function calculateCollectionState(survey) {
   return { target_progress: progress, responses_remaining: target > 0 ? Math.max(0, target - responses) : null, collection_state: label, ending_soon: endingSoon };
 }
 
+const ATTENTION_APPROACHING_DEADLINE_DAYS = 3;
+const ATTENTION_BEHIND_TARGET_DAYS = 7;
+const ATTENTION_CAPACITY_WARNING_PERCENT = 90;
+const ATTENTION_ITEM_LIMIT = 5;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+function calculateDaysRemaining(deadline, nowMs) {
+  const deadlineMs = Date.parse(deadline || '');
+  if (!Number.isFinite(deadlineMs)) return null;
+  return Math.max(0, Math.ceil((deadlineMs - nowMs) / DAY_IN_MS));
+}
+
+function buildAttentionItems(surveys, questionsBySurvey, nowMs = Date.now()) {
+  const items = [];
+  const add = (survey, type, severity, message, extra = {}) => {
+    const responseCount = Number(survey.response_count || 0);
+    const targetResponses = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+    const responseLimit = Number.isSafeInteger(survey.response_limit) ? survey.response_limit : null;
+    items.push({
+      surveyId: survey.id,
+      title: survey.title,
+      type,
+      severity,
+      message,
+      responseCount,
+      targetResponses,
+      responseLimit,
+      deadline: survey.response_deadline || null,
+      daysRemaining: calculateDaysRemaining(survey.response_deadline, nowMs),
+      progressPercent: targetResponses ? Math.min(100, Math.round((responseCount / targetResponses) * 100)) : null,
+      ...extra
+    });
+  };
+
+  for (const survey of surveys) {
+    const responseCount = Number(survey.response_count || 0);
+    const target = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+    const limit = Number.isSafeInteger(survey.response_limit) ? survey.response_limit : null;
+    const deadlineMs = Date.parse(survey.response_deadline || '');
+    const hasDeadline = Number.isFinite(deadlineMs);
+    const daysRemaining = hasDeadline ? calculateDaysRemaining(survey.response_deadline, nowMs) : null;
+
+    if (survey.status === 'active' && hasDeadline && deadlineMs <= nowMs) {
+      add(survey, 'deadline_passed', 'critical', 'Response deadline has passed.');
+    }
+    if (survey.status === 'active' && hasDeadline && deadlineMs > nowMs && daysRemaining <= ATTENTION_APPROACHING_DEADLINE_DAYS) {
+      add(survey, 'deadline_approaching', 'warning', `Response deadline is within ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}.`);
+    }
+    if (survey.status === 'active' && target && responseCount >= target) {
+      add(survey, 'target_achieved', 'success', `Target reached: ${responseCount} / ${target} responses.`);
+    }
+    if (survey.status === 'active' && target && hasDeadline && deadlineMs > nowMs && daysRemaining <= ATTENTION_BEHIND_TARGET_DAYS && responseCount / target < 0.75) {
+      const severity = daysRemaining <= ATTENTION_APPROACHING_DEADLINE_DAYS ? 'high' : 'warning';
+      add(survey, 'behind_target_near_deadline', severity, `Below target: ${responseCount} / ${target} responses with ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} remaining.`);
+    }
+    if (survey.status === 'active' && limit && responseCount < limit && responseCount / limit >= ATTENTION_CAPACITY_WARNING_PERCENT / 100) {
+      add(survey, 'capacity_almost_full', 'warning', `Response capacity is nearly full: ${responseCount} / ${limit}.`);
+    }
+    if (survey.status === 'draft') {
+      const readiness = computeReadiness(survey, questionsBySurvey.get(survey.id) || []);
+      if (!readiness.ready) {
+        add(survey, 'draft_not_ready', 'warning', `${readiness.blocking.length} publishing check${readiness.blocking.length === 1 ? '' : 's'} still need attention.`, { readinessPercentage: readiness.percentage });
+      }
+    }
+  }
+
+  const severityOrder = { critical: 0, high: 1, warning: 2, success: 3 };
+  return items.sort((a, b) => {
+    const severityDifference = severityOrder[a.severity] - severityOrder[b.severity];
+    if (severityDifference) return severityDifference;
+    const aDeadline = a.deadline ? Date.parse(a.deadline) : Number.POSITIVE_INFINITY;
+    const bDeadline = b.deadline ? Date.parse(b.deadline) : Number.POSITIVE_INFINITY;
+    if (aDeadline !== bDeadline) return aDeadline - bDeadline;
+    const titleDifference = a.title.localeCompare(b.title);
+    return titleDifference || a.surveyId - b.surveyId;
+  });
+}
+
 async function getSurveyResponseCount(surveyId) {
   const row = await dbGet('SELECT COUNT(*) AS count FROM responses WHERE survey_id = ?', [surveyId]);
   return row ? row.count : 0;
@@ -328,6 +406,8 @@ app.get('/api/auth/me', (req, res) => {
  */
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
+    const requestedAttentionLimit = parsePositiveId(req.query.attentionLimit);
+    const attentionLimit = requestedAttentionLimit ? Math.min(requestedAttentionLimit, 100) : ATTENTION_ITEM_LIMIT;
     const totalSurveysRow = await dbGet('SELECT COUNT(*) AS count FROM surveys');
     const activeSurveysRow = await dbGet("SELECT COUNT(*) AS count FROM surveys WHERE status = 'active'");
     const closedSurveysRow = await dbGet("SELECT COUNT(*) AS count FROM surveys WHERE status = 'closed'");
@@ -352,12 +432,35 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       LIMIT 5
     `);
 
+    const attentionSurveys = await dbAll(`
+      SELECT s.id, s.title, s.status, s.response_deadline, s.response_limit, s.target_responses,
+        COUNT(r.id) AS response_count
+      FROM surveys s
+      LEFT JOIN responses r ON s.id = r.survey_id
+      WHERE s.is_archived = 0
+      GROUP BY s.id
+    `);
+    const attentionSurveyIds = attentionSurveys.map(survey => survey.id);
+    const attentionQuestions = attentionSurveyIds.length
+      ? await dbAll(`SELECT id, survey_id, question_text, question_type, options_json, is_required, sort_order
+        FROM questions WHERE survey_id IN (${attentionSurveyIds.map(() => '?').join(', ')}) ORDER BY survey_id, sort_order, id`, attentionSurveyIds)
+      : [];
+    const questionsBySurvey = new Map();
+    attentionQuestions.forEach(question => {
+      const questions = questionsBySurvey.get(question.survey_id) || [];
+      questions.push(question);
+      questionsBySurvey.set(question.survey_id, questions);
+    });
+    const allAttentionItems = buildAttentionItems(attentionSurveys, questionsBySurvey);
+
     return res.json({
       totalSurveys: totalSurveysRow ? totalSurveysRow.count : 0,
       activeSurveys: activeSurveysRow ? activeSurveysRow.count : 0,
       closedSurveys: closedSurveysRow ? closedSurveysRow.count : 0,
       totalResponses: totalResponsesRow ? totalResponsesRow.count : 0,
-      recentSurveys
+      recentSurveys,
+      attentionItems: allAttentionItems.slice(0, attentionLimit),
+      totalAttentionItems: allAttentionItems.length
     });
   } catch (err) {
     console.error('Dashboard error:', err);

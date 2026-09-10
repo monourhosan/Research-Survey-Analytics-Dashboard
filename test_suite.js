@@ -302,6 +302,13 @@ async function runTests() {
       'TEST 16f: Expired survey blocks public loading and submissions with a clear code'
     );
 
+    const expiredAttentionDashboard = await request('GET', '/api/dashboard?attentionLimit=100', null, sessionCookie);
+    assert(
+      expiredAttentionDashboard.status === 200 &&
+      expiredAttentionDashboard.body.attentionItems.some(item => item.surveyId === deadlineSurveyId && item.type === 'deadline_passed' && item.severity === 'critical'),
+      'TEST 16f1: Active surveys with passed deadlines are prioritized for attention'
+    );
+
     const expiredAnalytics = await request('GET', `/api/surveys/${deadlineSurveyId}/analytics`, null, sessionCookie);
     const expiredCsv = await request('GET', `/api/surveys/${deadlineSurveyId}/export.csv`, null, sessionCookie);
     const removeDeadline = await request('PUT', `/api/surveys/${deadlineSurveyId}`, {
@@ -516,6 +523,51 @@ async function runTests() {
     const templateDelete = await request('DELETE', `/api/templates/${template.body.id}`, null, sessionCookie);
     assert(templateDelete.status === 200, 'TEST 21m: Templates can be deleted');
 
+    // TEST 22: Attention Required items are server-derived, actionable, and consistently ordered.
+    const makeAttentionSurvey = async (title, settings = {}) => request('POST', '/api/surveys', {
+      title,
+      description: 'Dashboard attention verification survey.',
+      status: settings.status || 'active',
+      response_deadline: settings.response_deadline,
+      response_limit: settings.response_limit,
+      target_responses: settings.target_responses,
+      questions: settings.questions === undefined
+        ? [{ question_text: 'Is the dashboard rule clear?', question_type: 'yes_no', is_required: true, sort_order: 1 }]
+        : settings.questions
+    }, sessionCookie);
+
+    const now = Date.now();
+    const approachingAttention = await makeAttentionSurvey(`AAA Attention approaching ${now}`, { response_deadline: new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString() });
+    const behindAttention = await makeAttentionSurvey(`AAA Attention behind ${now}`, { response_deadline: new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString(), target_responses: 20 });
+    const capacityAttention = await makeAttentionSurvey(`AAA Attention capacity ${now}`, { response_limit: 10 });
+    const targetAttention = await makeAttentionSurvey(`AAA Attention target ${now}`, { target_responses: 2 });
+    const draftAttention = await makeAttentionSurvey(`AAA Attention draft ${now}`, { status: 'draft', questions: [] });
+    const neutralAttention = await makeAttentionSurvey(`AAA Attention neutral ${now}`);
+
+    const capacityPublic = await request('GET', `/api/public/surveys/${capacityAttention.body.id}`);
+    const targetPublic = await request('GET', `/api/public/surveys/${targetAttention.body.id}`);
+    const capacityQuestionId = capacityPublic.body.questions[0].id;
+    const targetQuestionId = targetPublic.body.questions[0].id;
+    for (let index = 0; index < 9; index += 1) await request('POST', `/api/public/surveys/${capacityAttention.body.id}/responses`, { answers: { [capacityQuestionId]: 'Yes' } });
+    for (let index = 0; index < 2; index += 1) await request('POST', `/api/public/surveys/${targetAttention.body.id}/responses`, { answers: { [targetQuestionId]: 'Yes' } });
+
+    const attentionDashboard = await request('GET', '/api/dashboard?attentionLimit=100', null, sessionCookie);
+    const attentionItems = attentionDashboard.body.attentionItems || [];
+    const hasAttention = (surveyId, type) => attentionItems.some(item => item.surveyId === surveyId && item.type === type);
+    const ranks = { critical: 0, high: 1, warning: 2, success: 3 };
+    const stableOrder = attentionItems.every((item, index) => index === 0 || ranks[attentionItems[index - 1].severity] <= ranks[item.severity]);
+    assert(
+      attentionDashboard.status === 200 &&
+      hasAttention(approachingAttention.body.id, 'deadline_approaching') &&
+      hasAttention(behindAttention.body.id, 'behind_target_near_deadline') &&
+      hasAttention(capacityAttention.body.id, 'capacity_almost_full') &&
+      hasAttention(targetAttention.body.id, 'target_achieved') &&
+      hasAttention(draftAttention.body.id, 'draft_not_ready') &&
+      !attentionItems.some(item => item.surveyId === neutralAttention.body.id) &&
+      stableOrder,
+      'TEST 22: Dashboard attention rules cover approaching deadlines, targets, capacity, drafts, no-false-warning, and stable severity ordering'
+    );
+
     // TEST 17: Does logout work?
     const logoutRes = await request('POST', '/api/auth/logout', null, sessionCookie);
     assert(logoutRes.status === 200 && logoutRes.body.success, 'TEST 17: Admin logout succeeds');
@@ -542,6 +594,14 @@ async function runTests() {
     assert(
       surveysPage.status === 200 && surveysPage.raw.includes('qrcode-generator.js'),
       'TEST 20b: Survey page includes the local QR generator asset'
+    );
+
+    const dashboardPage = await request('GET', '/dashboard.html');
+    const dashboardScript = await request('GET', '/js/dashboard.js');
+    assert(
+      dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
+      dashboardScript.status === 200 && dashboardScript.raw.includes('renderAttentionItems'),
+      'TEST 20b1: Dashboard Attention Required panel assets load'
     );
 
     const builderPage = await request('GET', '/create-survey.html');

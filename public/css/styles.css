@@ -2659,3 +2659,42 @@ body.admin-page {
 .password-toggle { position: absolute; right: 10px; bottom: 10px; }
 .login-inline-error { min-height: 20px; margin: 10px 0 0; color: #9d3434; font-size: 12px; }
 @media (max-width: 560px) { .access-choice { padding: 14px; } .password-toggle { right: 6px; } }
+
+/* Phase 3 administrator team management */
+.settings-content { max-width: 1180px; }
+.settings-intro { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin: 2px 0 22px; }
+.settings-intro h2 { margin: 4px 0 7px; color: var(--color-primary); font-size: clamp(25px, 2.4vw, 34px); letter-spacing: -.05em; }
+.settings-intro p { max-width: 670px; margin: 0; color: var(--color-text-muted); font-size: 13px; line-height: 1.55; }
+.settings-team-card { overflow: hidden; border-radius: 16px; }
+.settings-team-card .card-header { padding: 20px 22px; }
+.team-table-wrap { overflow-x: auto; }
+.team-members-table td { vertical-align: middle; }
+.team-member-email { display: block; margin-top: 4px; color: var(--color-text-muted); font-size: 11px; font-weight: 500; }
+.team-role, .team-status { display: inline-flex; padding: 5px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.team-role { background: var(--color-background); color: var(--color-text-muted); }
+.team-status.is-active { background: rgba(74, 126, 91, .13); color: #2d6b42; }
+.team-status.is-disabled { background: rgba(157, 52, 52, .10); color: #963c3c; }
+.team-members-table .table-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 260px; }
+.team-empty-state { text-align: left; }
+.team-empty-state .btn { margin-top: 8px; }
+.settings-access-message { margin: 0 22px 18px; padding: 12px 14px; border: 1px solid #d9b7b7; border-radius: 10px; background: #fff8f7; color: #8f3333; font-size: 13px; font-weight: 700; }
+.team-member-dialog { width: min(94vw, 530px); }
+.team-member-dialog form { display: grid; gap: 9px; }
+.modal-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.modal-close { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: var(--color-background); color: var(--color-primary); font-size: 24px; line-height: 1; cursor: pointer; }
+.form-optional { color: var(--color-text-muted); font-size: 11px; font-weight: 500; }
+.form-error { min-height: 18px; margin: 2px 0 0; color: #9d3434; font-size: 12px; font-weight: 650; }
+.temporary-password-dialog { width: min(94vw, 510px); }
+.temporary-password-value { display: flex; align-items: center; gap: 8px; margin: 17px 0 4px; padding: 10px; border: 1px dashed var(--color-border); border-radius: 9px; background: var(--color-background); }
+.temporary-password-value code { min-width: 0; flex: 1; overflow-wrap: anywhere; color: var(--color-primary); font-weight: 800; }
+@media (max-width: 760px) {
+  .settings-intro { align-items: flex-start; flex-direction: column; }
+  .team-members-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .team-members-table, .team-members-table tbody, .team-members-table tr, .team-members-table td { display: block; width: 100%; }
+  .team-members-table tr { padding: 15px 17px; border-bottom: 1px solid var(--color-border); }
+  .team-members-table td { display: grid; grid-template-columns: 105px 1fr; gap: 10px; padding: 7px 0; border: 0; }
+  .team-members-table td::before { content: attr(data-label); color: var(--color-text-muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .team-members-table td:last-child::before { content: 'Actions'; }
+  .team-members-table .table-actions { justify-content: flex-start; min-width: 0; }
+}
+@media (max-width: 500px) { .settings-team-card .card-header { padding: 18px 16px; } .settings-access-message { margin-right: 16px; margin-left: 16px; } .team-members-table tr { padding-right: 16px; padding-left: 16px; } .temporary-password-value { align-items: stretch; flex-direction: column; } }

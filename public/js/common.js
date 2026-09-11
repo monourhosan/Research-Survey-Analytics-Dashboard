@@ -96,6 +96,10 @@ async function initAdminAuth() {
     if (emailEl) emailEl.textContent = data.user.email;
     if (avatarEl) avatarEl.textContent = data.user.name.charAt(0).toUpperCase();
 
+    document.querySelectorAll('[data-admin-only]').forEach(element => {
+      element.hidden = data.user.role !== 'admin';
+    });
+
     return data.user;
   } catch (err) {
     console.error('Session check failed:', err);

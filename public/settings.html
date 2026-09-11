@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Settings - Research Survey Analytics Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="admin-page">
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header"><div class="brand-icon">R</div><div><div class="brand-title">Research Survey</div><div class="brand-subtitle">Analytics Dashboard</div></div></div>
+      <nav class="sidebar-nav" aria-label="Main navigation">
+        <a href="dashboard.html" class="nav-link"><span aria-hidden="true">📊</span> Overview Dashboard</a>
+        <a href="surveys.html" class="nav-link"><span aria-hidden="true">📋</span> All Surveys</a>
+        <a href="create-survey.html" class="nav-link"><span aria-hidden="true">➕</span> Create Survey</a>
+        <a href="settings.html" class="nav-link" data-admin-only><span aria-hidden="true">⚙</span> Settings</a>
+      </nav>
+      <div class="sidebar-footer"><div class="user-profile"><div class="user-avatar" id="nav-user-avatar">A</div><div class="user-meta"><div class="user-name" id="nav-user-name">Research Admin</div><div class="user-email" id="nav-user-email">admin@research.local</div></div></div><button type="button" class="btn-logout" id="btn-global-logout"><span aria-hidden="true">🚪</span> Sign Out</button></div>
+    </aside>
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div style="display:flex;align-items:center;gap:16px"><button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button><div class="header-title-section"><span class="page-kicker">Workspace administration</span><h1>Settings</h1><p>Manage your research workspace and team access.</p></div></div>
+      </header>
+      <main class="content-area settings-content">
+        <section class="settings-intro"><div><span class="page-kicker">Access controls</span><h2>Team Members</h2><p>Add collaborators, update their account details, and control workspace access without removing historical records.</p></div><button class="btn btn-primary" id="btn-add-member" type="button"><span aria-hidden="true">＋</span> Add Team Member</button></section>
+        <section class="card settings-team-card" aria-labelledby="team-members-title">
+          <div class="card-header"><div><h3 class="card-title" id="team-members-title">Workspace collaborators</h3><p class="card-subtitle" id="team-members-summary">Loading team members…</p></div></div>
+          <div class="settings-access-message" id="settings-access-message" hidden></div>
+          <div class="team-table-wrap" id="team-members-container" aria-live="polite"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog class="custom-modal team-member-dialog" id="member-dialog" aria-labelledby="member-dialog-title">
+    <form id="member-form" novalidate>
+      <div class="modal-heading"><div><span class="page-kicker">Team access</span><h2 class="modal-title" id="member-dialog-title">Add Team Member</h2></div><button class="modal-close" type="button" id="btn-close-member-dialog" aria-label="Close">×</button></div>
+      <p class="modal-desc" id="member-dialog-description">Create a team-member account. Administrators retain full workspace control.</p>
+      <input type="hidden" id="member-id">
+      <label class="form-label" for="member-name">Display name</label><input class="form-input" id="member-name" name="name" maxlength="120" required autocomplete="name">
+      <label class="form-label" for="member-email">Email address</label><input class="form-input" id="member-email" name="email" type="email" maxlength="254" required autocomplete="email">
+      <div id="member-password-group"><label class="form-label" for="member-password">Temporary password <span class="form-optional">(optional — generate securely)</span></label><input class="form-input" id="member-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password"><p class="form-help-text">Use 10–128 characters, or leave blank to generate a one-time temporary password.</p></div>
+      <p class="form-error" id="member-form-error" role="alert"></p>
+      <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" id="btn-cancel-member">Cancel</button><button class="btn btn-primary btn-sm" type="submit" id="btn-save-member">Create Member</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="custom-modal team-password-dialog" id="temporary-password-dialog" aria-labelledby="temporary-password-title">
+    <div><h2 class="modal-title" id="temporary-password-title">Temporary password created</h2><p class="modal-desc">Copy this password now. It will not be displayed again.</p><div class="temporary-password-value"><code id="temporary-password-value"></code><button class="btn btn-secondary btn-sm" type="button" id="btn-copy-temporary-password">Copy</button></div><div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" id="btn-close-temporary-password">Done</button></div></div>
+  </dialog>
+  <script src="js/common.js"></script>
+  <script src="js/settings.js"></script>
+</body>
+</html>

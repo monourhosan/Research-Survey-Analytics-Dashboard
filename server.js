@@ -13,12 +13,15 @@
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
+const crypto = require('crypto');
 const {
   dbRun,
   dbGet,
   dbAll,
   initDatabase,
   verifyPassword,
+  hashPassword,
+  createUserAccount,
   USER_ROLES,
   isValidUserRole
 } = require('./database');
@@ -79,6 +82,57 @@ function safeUser(user) {
     email: user.email,
     role: user.role
   };
+}
+
+function safeTeamMember(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isActive: Number(user.is_active) === 1,
+    createdAt: user.created_at || null,
+    updatedAt: user.updated_at || null,
+    lastLoginAt: user.last_login_at || null
+  };
+}
+
+const TEAM_MEMBER_PASSWORD_MIN_LENGTH = 10;
+const TEAM_MEMBER_PASSWORD_MAX_LENGTH = 128;
+const TEAM_MEMBER_NAME_MAX_LENGTH = 120;
+
+function normalizeTeamMemberName(value) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (!name || name.length > TEAM_MEMBER_NAME_MAX_LENGTH) return { error: `Display name is required and must not exceed ${TEAM_MEMBER_NAME_MAX_LENGTH} characters.` };
+  return { value: name };
+}
+
+function normalizeTeamMemberEmail(value) {
+  const email = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return { error: 'A valid email address is required.' };
+  return { value: email };
+}
+
+function normalizeTeamMemberPassword(value) {
+  if (typeof value !== 'string' || value.length < TEAM_MEMBER_PASSWORD_MIN_LENGTH || value.length > TEAM_MEMBER_PASSWORD_MAX_LENGTH) return { error: `Password must contain ${TEAM_MEMBER_PASSWORD_MIN_LENGTH}-${TEAM_MEMBER_PASSWORD_MAX_LENGTH} characters.` };
+  return { value };
+}
+
+function generateTemporaryPassword() {
+  // Returned only in the immediate create/reset response; it is never persisted or logged.
+  return `Research-${crypto.randomBytes(12).toString('base64url')}`;
+}
+
+async function findTeamMember(memberId) {
+  return dbGet(
+    `SELECT id, name, email, role, is_active, created_at, updated_at, last_login_at
+     FROM users WHERE id = ? AND role = ?`,
+    [memberId, USER_ROLES.TEAM_MEMBER]
+  );
+}
+
+function isUniqueConstraintError(error) {
+  return /unique constraint|users\.email/i.test(error && error.message);
 }
 
 async function getActiveSessionUser(req) {
@@ -849,6 +903,98 @@ app.use([
   '/api/activity',
   '/api/saved-views'
 ], requireAdmin);
+
+/* ===========================================================================
+   1B. ADMINISTRATOR TEAM MANAGEMENT API
+   =========================================================================== */
+
+app.get('/api/team-members', requireAdmin, async (req, res) => {
+  try {
+    const members = await dbAll(
+      `SELECT id, name, email, role, is_active, created_at, updated_at, last_login_at
+       FROM users WHERE role = ? ORDER BY is_active DESC, name COLLATE NOCASE ASC`,
+      [USER_ROLES.TEAM_MEMBER]
+    );
+    return res.json({ teamMembers: members.map(safeTeamMember) });
+  } catch (_) {
+    return res.status(500).json({ error: 'Unable to load team members.' });
+  }
+});
+
+app.post('/api/team-members', requireAdmin, async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body || {};
+    if (role !== undefined && role !== USER_ROLES.TEAM_MEMBER) return res.status(400).json({ error: 'New accounts can only be created as team members.' });
+    const normalizedName = normalizeTeamMemberName(name);
+    const normalizedEmail = normalizeTeamMemberEmail(email);
+    if (normalizedName.error || normalizedEmail.error) return res.status(400).json({ error: normalizedName.error || normalizedEmail.error });
+    const generatedPassword = password === undefined || password === null || password === '';
+    const temporaryPassword = generatedPassword ? generateTemporaryPassword() : password;
+    const normalizedPassword = normalizeTeamMemberPassword(temporaryPassword);
+    if (normalizedPassword.error) return res.status(400).json({ error: normalizedPassword.error });
+    const member = await createUserAccount({ name: normalizedName.value, email: normalizedEmail.value, password: normalizedPassword.value, role: USER_ROLES.TEAM_MEMBER, createdByUserId: req.currentUser.id, mustChangePassword: true });
+    await recordActivity('team_member_created', null, { teamMemberId: member.id, email: member.email });
+    return res.status(201).json({ member: safeTeamMember(member), ...(generatedPassword ? { temporaryPassword } : {}) });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) return res.status(409).json({ error: 'A member with that email already exists.' });
+    return res.status(400).json({ error: error.message || 'Unable to create team member.' });
+  }
+});
+
+app.put('/api/team-members/:id', requireAdmin, async (req, res) => {
+  try {
+    const memberId = parsePositiveId(req.params.id);
+    if (!memberId) return res.status(400).json({ error: 'A valid team member ID is required.' });
+    if (req.body && req.body.role !== undefined && req.body.role !== USER_ROLES.TEAM_MEMBER) return res.status(400).json({ error: 'Team member roles cannot be changed here.' });
+    if (!await findTeamMember(memberId)) return res.status(404).json({ error: 'Team member not found.' });
+    const normalizedName = normalizeTeamMemberName(req.body && req.body.name);
+    const normalizedEmail = normalizeTeamMemberEmail(req.body && req.body.email);
+    if (normalizedName.error || normalizedEmail.error) return res.status(400).json({ error: normalizedName.error || normalizedEmail.error });
+    await dbRun('UPDATE users SET name = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND role = ?', [normalizedName.value, normalizedEmail.value, memberId, USER_ROLES.TEAM_MEMBER]);
+    const member = await findTeamMember(memberId);
+    await recordActivity('team_member_updated', null, { teamMemberId: memberId, email: member.email });
+    return res.json({ member: safeTeamMember(member) });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) return res.status(409).json({ error: 'A member with that email already exists.' });
+    return res.status(400).json({ error: 'Unable to update team member.' });
+  }
+});
+
+async function setTeamMemberActive(req, res, isActive) {
+  try {
+    const memberId = parsePositiveId(req.params.id);
+    if (!memberId) return res.status(400).json({ error: 'A valid team member ID is required.' });
+    if (!await findTeamMember(memberId)) return res.status(404).json({ error: 'Team member not found.' });
+    await dbRun('UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND role = ?', [isActive ? 1 : 0, memberId, USER_ROLES.TEAM_MEMBER]);
+    const member = await findTeamMember(memberId);
+    await recordActivity(isActive ? 'team_member_enabled' : 'team_member_disabled', null, { teamMemberId: memberId, email: member.email });
+    return res.json({ member: safeTeamMember(member) });
+  } catch (_) {
+    return res.status(500).json({ error: `Unable to ${isActive ? 'reactivate' : 'disable'} team member.` });
+  }
+}
+
+app.post('/api/team-members/:id/disable', requireAdmin, (req, res) => setTeamMemberActive(req, res, false));
+app.post('/api/team-members/:id/enable', requireAdmin, (req, res) => setTeamMemberActive(req, res, true));
+
+app.post('/api/team-members/:id/reset-password', requireAdmin, async (req, res) => {
+  try {
+    const memberId = parsePositiveId(req.params.id);
+    if (!memberId) return res.status(400).json({ error: 'A valid team member ID is required.' });
+    const existing = await findTeamMember(memberId);
+    if (!existing) return res.status(404).json({ error: 'Team member not found.' });
+    const suppliedPassword = req.body && req.body.password;
+    const generatedPassword = suppliedPassword === undefined || suppliedPassword === null || suppliedPassword === '';
+    const temporaryPassword = generatedPassword ? generateTemporaryPassword() : suppliedPassword;
+    const normalizedPassword = normalizeTeamMemberPassword(temporaryPassword);
+    if (normalizedPassword.error) return res.status(400).json({ error: normalizedPassword.error });
+    await dbRun(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND role = ?`, [hashPassword(normalizedPassword.value), memberId, USER_ROLES.TEAM_MEMBER]);
+    await recordActivity('team_member_password_reset', null, { teamMemberId: memberId, email: existing.email });
+    return res.json({ member: safeTeamMember(await findTeamMember(memberId)), ...(generatedPassword ? { temporaryPassword } : {}) });
+  } catch (_) {
+    return res.status(500).json({ error: 'Unable to reset team member password.' });
+  }
+});
 
 /* ==========================================================================
    2. DASHBOARD API

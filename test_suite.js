@@ -186,6 +186,71 @@ async function runTests() {
     const teamAdminRequest = await request('GET', '/api/dashboard?role=admin', null, teamCookie);
     assert(teamAdminRequest.status === 403, 'TEST 1i: RequireAdmin rejects a team member regardless of request role data');
 
+    const teamManagementDenied = await request('GET', '/api/team-members', null, teamCookie);
+    const teamCreationDenied = await request('POST', '/api/team-members', { name: 'Blocked Member', email: `blocked-${Date.now()}@research.local` }, teamCookie);
+    assert(teamManagementDenied.status === 403 && teamCreationDenied.status === 403, 'TEST 1i1: Team members cannot call administrator team-management APIs');
+
+    const managedMemberEmail = `managed-${Date.now()}@research.local`;
+    const createdManagedMember = await request('POST', '/api/team-members', {
+      name: 'Managed Team Member', email: managedMemberEmail
+    }, sessionCookie);
+    const createdPayload = JSON.stringify(createdManagedMember.body || {});
+    const createdTemporaryPassword = createdManagedMember.body && createdManagedMember.body.temporaryPassword;
+    const managedMemberId = createdManagedMember.body && createdManagedMember.body.member && createdManagedMember.body.member.id;
+    assert(
+      createdManagedMember.status === 201 && managedMemberId && createdManagedMember.body.member.role === USER_ROLES.TEAM_MEMBER &&
+      typeof createdTemporaryPassword === 'string' && createdTemporaryPassword.length >= 10 &&
+      !createdPayload.includes('password_hash') && !createdPayload.includes('password_salt'),
+      'TEST 1i2: Admin creates a safe team-member account with a one-time generated password'
+    );
+
+    const attemptedAdminInjection = await request('POST', '/api/team-members', {
+      name: 'Injected Admin', email: `injected-${Date.now()}@research.local`, password: 'InjectionPass123!', role: USER_ROLES.ADMIN
+    }, sessionCookie);
+    const duplicateTeamMember = await request('POST', '/api/team-members', {
+      name: 'Duplicate Managed Member', email: managedMemberEmail, password: 'DuplicatePass123!'
+    }, sessionCookie);
+    assert(attemptedAdminInjection.status === 400 && duplicateTeamMember.status === 409, 'TEST 1i3: Team API rejects administrator-role injection and duplicate identities');
+
+    const initialManagedLogin = await request('POST', '/api/auth/login', { email: managedMemberEmail, password: createdTemporaryPassword, accessMode: USER_ROLES.TEAM_MEMBER });
+    const managedCookie = initialManagedLogin.headers['set-cookie'] ? initialManagedLogin.headers['set-cookie'][0].split(';')[0] : null;
+    assert(initialManagedLogin.status === 200 && !!managedCookie, 'TEST 1i4: Newly created team member can authenticate with the one-time password');
+
+    const teamList = await request('GET', '/api/team-members', null, sessionCookie);
+    const teamListText = JSON.stringify(teamList.body || {});
+    assert(
+      teamList.status === 200 && Array.isArray(teamList.body.teamMembers) &&
+      teamList.body.teamMembers.every(member => !Object.prototype.hasOwnProperty.call(member, 'password_hash') && !Object.prototype.hasOwnProperty.call(member, 'must_change_password')) &&
+      !teamListText.includes(createdTemporaryPassword),
+      'TEST 1i5: Team list exposes only safe account fields and never temporary passwords'
+    );
+
+    const editedManagedMember = await request('PUT', `/api/team-members/${managedMemberId}`, {
+      name: 'Updated Managed Member', email: `updated-${Date.now()}@research.local`
+    }, sessionCookie);
+    const updatedManagedEmail = editedManagedMember.body && editedManagedMember.body.member && editedManagedMember.body.member.email;
+    assert(editedManagedMember.status === 200 && editedManagedMember.body.member.name === 'Updated Managed Member', 'TEST 1i6: Admin can edit team-member name and login identity');
+
+    const disabledManagedMember = await request('POST', `/api/team-members/${managedMemberId}/disable`, {}, sessionCookie);
+    const blockedManagedSession = await request('GET', '/api/auth/me', null, managedCookie);
+    const blockedManagedLogin = await request('POST', '/api/auth/login', { email: updatedManagedEmail, password: createdTemporaryPassword }, null);
+    assert(disabledManagedMember.status === 200 && disabledManagedMember.body.member.isActive === false && blockedManagedSession.body.authenticated === false && blockedManagedLogin.status === 401, 'TEST 1i7: Disabling a member blocks new logins and invalidates existing sessions');
+
+    const enabledManagedMember = await request('POST', `/api/team-members/${managedMemberId}/enable`, {}, sessionCookie);
+    const reactivatedManagedLogin = await request('POST', '/api/auth/login', { email: updatedManagedEmail, password: createdTemporaryPassword }, null);
+    assert(enabledManagedMember.status === 200 && enabledManagedMember.body.member.isActive === true && reactivatedManagedLogin.status === 200, 'TEST 1i8: Administrator can reactivate a disabled team member');
+
+    const passwordReset = await request('POST', `/api/team-members/${managedMemberId}/reset-password`, {}, sessionCookie);
+    const resetTemporaryPassword = passwordReset.body && passwordReset.body.temporaryPassword;
+    const oldPasswordRejected = await request('POST', '/api/auth/login', { email: updatedManagedEmail, password: createdTemporaryPassword }, null);
+    const newPasswordAccepted = await request('POST', '/api/auth/login', { email: updatedManagedEmail, password: resetTemporaryPassword }, null);
+    const postResetList = await request('GET', '/api/team-members', null, sessionCookie);
+    assert(
+      passwordReset.status === 200 && typeof resetTemporaryPassword === 'string' && oldPasswordRejected.status === 401 && newPasswordAccepted.status === 200 &&
+      !JSON.stringify(postResetList.body || {}).includes(resetTemporaryPassword),
+      'TEST 1i9: Password reset invalidates the old password and keeps temporary passwords out of later APIs'
+    );
+
     await dbRun('UPDATE users SET is_active = 0 WHERE id = ?', [teamMember.id]);
     const disabledLogin = await request('POST', '/api/auth/login', { email: testTeamEmail, password: 'MemberPass123!' });
     assert(disabledLogin.status === 401, 'TEST 1j: Disabled team member cannot authenticate');
@@ -934,16 +999,16 @@ async function runTests() {
     assert(logoutRes.status === 200 && logoutRes.body.success, 'TEST 17: Admin logout succeeds');
 
     // TEST 19: Check HTML pages exist and load with HTTP 200
-    const pages = ['/login.html', '/dashboard.html', '/surveys.html', '/create-survey.html', '/survey.html', '/analytics.html'];
+    const pages = ['/login.html', '/dashboard.html', '/surveys.html', '/create-survey.html', '/survey.html', '/analytics.html', '/settings.html'];
     let allPagesOk = true;
     for (const p of pages) {
       const pageRes = await request('GET', p);
       if (pageRes.status !== 200) allPagesOk = false;
     }
-    assert(allPagesOk, 'TEST 19: All 6 main HTML pages load with HTTP 200');
+    assert(allPagesOk, 'TEST 19: All 7 main HTML pages load with HTTP 200');
 
     // TEST 20: Critical frontend assets exist (prevents unstyled pages and broken form handlers)
-    const assets = ['/css/styles.css', '/js/common.js', '/js/login.js', '/js/qrcode-generator.js'];
+    const assets = ['/css/styles.css', '/js/common.js', '/js/login.js', '/js/settings.js', '/js/qrcode-generator.js'];
     let allAssetsOk = true;
     for (const asset of assets) {
       const assetRes = await request('GET', asset);

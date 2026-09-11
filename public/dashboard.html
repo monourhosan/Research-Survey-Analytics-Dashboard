@@ -22,16 +22,16 @@
 
       <nav class="sidebar-nav">
         <a href="dashboard.html" class="nav-link">
-          <span>📊</span> Overview Dashboard
+          Overview Dashboard
         </a>
         <a href="surveys.html" class="nav-link">
-          <span>📋</span> All Surveys
+          All Surveys
         </a>
         <a href="create-survey.html" class="nav-link">
-          <span>➕</span> Create Survey
+          Create Survey
         </a>
         <a href="settings.html" class="nav-link" data-admin-only>
-          <span>⚙</span> Settings
+          Settings
         </a>
       </nav>
 
@@ -44,7 +44,7 @@
           </div>
         </div>
         <button type="button" class="btn-logout" id="btn-global-logout">
-          <span>🚪</span> Sign Out
+          Sign Out
         </button>
       </div>
     </aside>
@@ -92,28 +92,24 @@
         <!-- Metric Cards -->
         <section class="metrics-grid dashboard-metrics" aria-label="Survey portfolio metrics">
           <article class="metric-card dashboard-metric-card">
-            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">▦</div></div>
             <div class="metric-label">Total Surveys</div>
             <div class="metric-value" id="stat-total-surveys">0</div>
             <div class="metric-meta">Across all research projects</div>
           </article>
 
           <article class="metric-card dashboard-metric-card metric-card-highlight">
-            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">↗</div></div>
             <div class="metric-label">Active Surveys</div>
             <div class="metric-value" id="stat-active-surveys">0</div>
             <div class="metric-meta">Currently accepting responses</div>
           </article>
 
           <article class="metric-card dashboard-metric-card">
-            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">✓</div></div>
             <div class="metric-label">Closed Surveys</div>
             <div class="metric-value" id="stat-closed-surveys">0</div>
             <div class="metric-meta">Archived historical studies</div>
           </article>
 
           <article class="metric-card dashboard-metric-card">
-            <div class="metric-card-top"><div class="metric-icon" aria-hidden="true">◌</div></div>
             <div class="metric-label">Total Responses</div>
             <div class="metric-value" id="stat-total-responses">0</div>
             <div class="metric-meta">Total respondent submissions</div>

@@ -72,7 +72,7 @@ function setCommandCenterIdentity(user) {
   const greeting = document.getElementById('command-center-greeting');
   if (!greeting) return;
   const displayName = typeof user?.name === 'string' && user.name.trim() ? user.name.trim() : 'Researcher';
-  greeting.textContent = `${commandCenterGreetingForHour()}, ${displayName} 👋`;
+  greeting.textContent = `${commandCenterGreetingForHour()}, ${displayName}`;
 }
 
 function renderCommandCenterSummary(data) {
@@ -376,7 +376,6 @@ async function loadDashboardData() {
       tbody.innerHTML = `
         <tr>
           <td colspan="5" class="empty-state">
-            <div class="empty-state-icon">📋</div>
             <div class="empty-state-title">No surveys created yet</div>
             <div class="empty-state-desc">Create your first research survey to start collecting and analyzing responses.</div>
             <a href="create-survey.html" class="btn btn-primary btn-sm">Create Survey</a>
@@ -419,9 +418,7 @@ async function loadDashboardData() {
         </td>
         <td style="text-align: right;">
           <div class="table-actions" style="justify-content: flex-end;">
-            <a href="analytics.html?id=${survey.id}" class="btn btn-secondary btn-sm" title="View Analytics">
-              <span>📈</span> Analytics
-            </a>
+            <a href="analytics.html?id=${survey.id}" class="btn btn-secondary btn-sm" title="View Analytics">Analytics</a>
             <a href="create-survey.html?edit=${survey.id}" class="btn btn-secondary btn-sm" title="Manage Survey">
               Manage
             </a>

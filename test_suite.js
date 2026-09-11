@@ -174,6 +174,12 @@ async function runTests() {
     const teamCookie = teamLogin.headers['set-cookie'] ? teamLogin.headers['set-cookie'][0].split(';')[0] : null;
     assert(teamLogin.status === 200 && teamLogin.body.user.role === USER_ROLES.TEAM_MEMBER && !!teamCookie, 'TEST 1g: Team member authenticates through the backend flow');
 
+    const adminModeLogin = await request('POST', '/api/auth/login', { email: 'admin@research.local', password: 'Admin123!', accessMode: USER_ROLES.ADMIN });
+    const teamModeLogin = await request('POST', '/api/auth/login', { email: testTeamEmail, password: 'MemberPass123!', accessMode: USER_ROLES.TEAM_MEMBER });
+    const wrongModeLogin = await request('POST', '/api/auth/login', { email: testTeamEmail, password: 'MemberPass123!', accessMode: USER_ROLES.ADMIN });
+    const invalidModeLogin = await request('POST', '/api/auth/login', { email: 'admin@research.local', password: 'Admin123!', accessMode: 'owner' });
+    assert(adminModeLogin.status === 200 && teamModeLogin.status === 200 && wrongModeLogin.status === 403 && invalidModeLogin.status === 403, 'TEST 1g1: Access-type selection is strictly verified against the stored role');
+
     const teamMe = await request('GET', '/api/auth/me', null, teamCookie);
     assert(teamMe.status === 200 && teamMe.body.authenticated && teamMe.body.user.role === USER_ROLES.TEAM_MEMBER, 'TEST 1h: Team member auth me exposes the safe team role');
 

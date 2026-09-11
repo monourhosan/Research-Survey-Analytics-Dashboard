@@ -770,7 +770,7 @@ function serializeResponseSubmission(task) {
  */
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, accessMode } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -783,6 +783,9 @@ app.post('/api/auth/login', async (req, res) => {
     const isValid = user && verifyPassword(password, user.password_hash);
     if (!isValid || Number(user.is_active) !== 1 || !isValidUserRole(user.role)) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    if (accessMode !== undefined && (!isValidUserRole(accessMode) || accessMode !== user.role)) {
+      return res.status(403).json({ error: 'This account is not authorized for the selected access type.' });
     }
 
     // Store only the minimal trusted identity. Name/email are always read from

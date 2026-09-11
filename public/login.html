@@ -31,28 +31,43 @@
       <div class="login-card">
         <div class="login-header">
           <div class="login-mobile-brand"><span class="login-logo" aria-hidden="true">R</span><span>Research Survey</span></div>
-          <span class="eyebrow">Administrator access</span>
+          <span class="eyebrow" id="login-eyebrow">Research workspace</span>
           <h2 class="login-title">Welcome back</h2>
-          <p class="login-subtitle">Sign in to manage your research workspace.</p>
+          <p class="login-subtitle" id="login-subtitle">Choose how you want to access the workspace.</p>
         </div>
 
-        <form id="login-form" method="post" action="/api/auth/login">
+        <section id="access-selection" class="access-selection" aria-labelledby="access-selection-title">
+          <h3 id="access-selection-title" class="sr-only">Select access type</h3>
+          <button type="button" class="access-choice" data-access-mode="admin">
+            <span class="access-choice-icon" aria-hidden="true">◆</span><span><strong>Administrator</strong><small>Full workspace and team management</small></span><span aria-hidden="true">→</span>
+          </button>
+          <button type="button" class="access-choice" data-access-mode="team_member">
+            <span class="access-choice-icon" aria-hidden="true">◌</span><span><strong>Team Member</strong><small>Research workspace access</small></span><span aria-hidden="true">→</span>
+          </button>
+        </section>
+
+        <form id="login-form" method="post" action="/api/auth/login" hidden>
+          <button type="button" id="btn-login-back" class="login-back">← Back</button>
+          <h3 id="login-mode-title" class="login-mode-title">Administrator Login</h3>
           <div class="form-group">
-            <label for="email" class="form-label">Admin email</label>
+            <label for="email" class="form-label">Username / Email</label>
             <input type="email" id="email" name="email" class="form-input" placeholder="admin@research.local" required autocomplete="email">
           </div>
 
-          <div class="form-group">
+          <div class="form-group password-field-wrap">
             <label for="password" class="form-label">Password</label>
             <input type="password" id="password" name="password" class="form-input" placeholder="Enter your password" required autocomplete="current-password">
+            <button type="button" id="btn-toggle-password" class="password-toggle" aria-pressed="false">Show password</button>
           </div>
 
           <button type="submit" id="btn-submit-login" class="btn btn-primary login-submit">
             Sign In <span aria-hidden="true">→</span>
           </button>
+          <p id="login-inline-error" class="login-inline-error" role="status" aria-live="polite"></p>
+          <p id="team-access-help" class="team-access-help" hidden>Need access? Contact your administrator.</p>
         </form>
 
-        <div class="demo-credentials-box">
+        <div class="demo-credentials-box" id="demo-credentials-box">
           <div class="demo-credentials-heading"><span aria-hidden="true">◇</span><strong>Defense demonstration access</strong></div>
           <p>Use the prepared local account during the project defense.</p>
           <div class="demo-credential-grid"><code>admin@research.local</code><code>Admin123!</code></div>

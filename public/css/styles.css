@@ -2643,3 +2643,19 @@ body.admin-page {
   .builder-action-buttons { width: 100%; }
   .builder-action-buttons .btn { flex: 1 1 calc(50% - 6px); }
 }
+
+/* Phase 3 access-type selection */
+.access-selection { display: grid; gap: 12px; margin: 22px 0; }
+.access-choice { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; width: 100%; padding: 16px; text-align: left; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface); color: var(--color-primary); cursor: pointer; }
+.access-choice:hover, .access-choice:focus-visible { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(111, 76, 157, .16); outline: none; }
+.access-choice strong, .access-choice small { display: block; }
+.access-choice small, .team-access-help { margin-top: 3px; color: var(--color-text-muted); font-size: 12px; }
+.access-choice-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--color-background); }
+.login-back, .password-toggle { border: 0; background: transparent; color: var(--color-primary); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.login-back { margin: 0 0 12px; padding: 0; }
+.login-mode-title { margin: 0 0 17px; font-size: 18px; }
+.password-field-wrap { position: relative; }
+.password-field-wrap .form-input { padding-right: 118px; }
+.password-toggle { position: absolute; right: 10px; bottom: 10px; }
+.login-inline-error { min-height: 20px; margin: 10px 0 0; color: #9d3434; font-size: 12px; }
+@media (max-width: 560px) { .access-choice { padding: 14px; } .password-toggle { right: 6px; } }

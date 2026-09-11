@@ -3,8 +3,8 @@
 | Part | Feature | Weight | Status | Part Completion |
 |---|---|---:|---|---:|
 | 11 | Multi-user authentication foundation | 25% | Completed | 100% |
-| 12 | Admin / Team Member login redesign | 25% | Not started | 0% |
+| 12 | Admin / Team Member login redesign | 25% | UI, role verification, and tests complete | 75% |
 | 13 | Team Management in Settings | 25% | Not started | 0% |
 | 14 | Permissions, security hardening & activity attribution | 25% | Not started | 0% |
 
-**Phase 3 completion: 25%**
+**Phase 3 completion: 43.75%**

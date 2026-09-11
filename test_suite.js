@@ -4,6 +4,19 @@
  */
 
 const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const testDatabasePath = process.env.SURVEY_DB_PATH || path.join(os.tmpdir(), `research-survey-dashboard-test-${process.pid}.db`);
+process.env.SURVEY_DB_PATH = testDatabasePath;
+const app = require('./server');
+const {
+  dbGet,
+  dbRun,
+  initDatabase,
+  USER_ROLES,
+  createUserAccount
+} = require('./database');
 const {
   normalizeCommandQuery,
   getWorkspaceActions,
@@ -26,14 +39,35 @@ const {
   buildResearchHealth,
   highestTargetMilestone,
   buildAchievementBadges
-} = require('./server');
+} = app;
+
+const TEST_PORT = Number(process.env.TEST_PORT || 3001);
+let testServer = null;
+
+function startTestServer() {
+  return new Promise((resolve, reject) => {
+    testServer = app.listen(TEST_PORT, '127.0.0.1', () => resolve());
+    testServer.once('error', reject);
+  });
+}
+
+function stopTestServer() {
+  return new Promise(resolve => {
+    if (!testServer) return resolve();
+    testServer.close(() => resolve());
+  });
+}
+
+function removeTestDatabase() {
+  try { fs.rmSync(testDatabasePath, { force: true }); } catch (_) {}
+}
 
 function request(method, path, body = null, cookie = null) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
     const options = {
       hostname: 'localhost',
-      port: 3000,
+      port: TEST_PORT,
       path,
       method,
       headers: {
@@ -76,6 +110,7 @@ async function runTests() {
   let passed = 0;
   let failed = 0;
   let initialResponsePulse = null;
+  let testTeamEmail = null;
 
   function assert(condition, name, details = '') {
     if (condition) {
@@ -88,6 +123,7 @@ async function runTests() {
   }
 
   try {
+    await startTestServer();
     // TEST 2: Incorrect login fails
     const badLogin = await request('POST', '/api/auth/login', {
       email: 'admin@research.local',
@@ -104,6 +140,55 @@ async function runTests() {
     const setCookie = goodLogin.headers['set-cookie'];
     const sessionCookie = setCookie ? setCookie[0].split(';')[0] : null;
     assert(!!sessionCookie, 'TEST 1b: Session cookie successfully issued');
+
+    const migratedAdmin = await dbGet('SELECT id, role, is_active, password_hash FROM users WHERE email = ?', ['admin@research.local']);
+    assert(migratedAdmin && migratedAdmin.role === USER_ROLES.ADMIN && Number(migratedAdmin.is_active) === 1, 'TEST 1c: Existing administrator migration assigns an active admin role');
+
+    const adminMe = await request('GET', '/api/auth/me', null, sessionCookie);
+    const safeAdminPayload = JSON.stringify(adminMe.body || {});
+    assert(
+      adminMe.status === 200 && adminMe.body.authenticated && adminMe.body.user.role === USER_ROLES.ADMIN &&
+      !safeAdminPayload.includes('password_hash') && !safeAdminPayload.includes('password_salt'),
+      'TEST 1d: Auth me returns safe administrator identity and role only'
+    );
+
+    let invalidRoleRejected = false;
+    try {
+      await createUserAccount({ name: 'Invalid Role', email: `invalid-role-${Date.now()}@research.local`, password: 'MemberPass123!', role: 'observer' });
+    } catch (error) {
+      invalidRoleRejected = /role/i.test(error.message);
+    }
+    assert(invalidRoleRejected, 'TEST 1e: Shared role validation rejects invalid roles before persistence');
+
+    testTeamEmail = `team-${Date.now()}@research.local`;
+    const teamMember = await createUserAccount({
+      name: 'Research Team Member',
+      email: testTeamEmail,
+      password: 'MemberPass123!',
+      role: USER_ROLES.TEAM_MEMBER,
+      createdByUserId: migratedAdmin.id
+    });
+    assert(teamMember && teamMember.role === USER_ROLES.TEAM_MEMBER && Number(teamMember.is_active) === 1, 'TEST 1f: Team member account is created with the team_member role');
+
+    const teamLogin = await request('POST', '/api/auth/login', { email: testTeamEmail, password: 'MemberPass123!' });
+    const teamCookie = teamLogin.headers['set-cookie'] ? teamLogin.headers['set-cookie'][0].split(';')[0] : null;
+    assert(teamLogin.status === 200 && teamLogin.body.user.role === USER_ROLES.TEAM_MEMBER && !!teamCookie, 'TEST 1g: Team member authenticates through the backend flow');
+
+    const teamMe = await request('GET', '/api/auth/me', null, teamCookie);
+    assert(teamMe.status === 200 && teamMe.body.authenticated && teamMe.body.user.role === USER_ROLES.TEAM_MEMBER, 'TEST 1h: Team member auth me exposes the safe team role');
+
+    const teamAdminRequest = await request('GET', '/api/dashboard?role=admin', null, teamCookie);
+    assert(teamAdminRequest.status === 403, 'TEST 1i: RequireAdmin rejects a team member regardless of request role data');
+
+    await dbRun('UPDATE users SET is_active = 0 WHERE id = ?', [teamMember.id]);
+    const disabledLogin = await request('POST', '/api/auth/login', { email: testTeamEmail, password: 'MemberPass123!' });
+    assert(disabledLogin.status === 401, 'TEST 1j: Disabled team member cannot authenticate');
+    const disabledSession = await request('GET', '/api/auth/me', null, teamCookie);
+    assert(disabledSession.status === 200 && disabledSession.body.authenticated === false, 'TEST 1k: Disabled member sessions are invalidated safely');
+
+    await initDatabase();
+    const adminCount = await dbGet('SELECT COUNT(*) AS count FROM users WHERE email = ?', ['admin@research.local']);
+    assert(Number(adminCount.count) === 1, 'TEST 1l: User-role migration is idempotent and does not duplicate the administrator');
 
     // TEST 18: Unauthenticated access rejected
     const unauthCheck = await request('GET', '/api/dashboard');
@@ -321,6 +406,7 @@ async function runTests() {
     const publicSurvey = await request('GET', `/api/public/surveys/${createdId}`);
     assert(publicSurvey.status === 200 && publicSurvey.body.status === 'active', 'TEST 6 & 7: Public respondent can retrieve active survey');
     assert(publicSurvey.body.questions.length === 4, 'TEST 7b: Public survey returns all questions and choices');
+    assert(!JSON.stringify(publicSurvey.body).includes(testTeamEmail), 'TEST 7c: Public survey response excludes team account data');
 
     // Find question IDs
     const qRating = publicSurvey.body.questions.find(q => q.question_type === 'rating');
@@ -792,7 +878,18 @@ async function runTests() {
       !attentionItems.some(item => item.surveyId === neutralAttention.body.id) &&
       attentionDashboard.body.responseActivity && attentionDashboard.body.responseActivity.rangeDays === 7 &&
       stableOrder,
-      'TEST 22: Dashboard attention payload remains intact alongside response activity data'
+      'TEST 22: Dashboard attention payload remains intact alongside response activity data',
+      JSON.stringify({
+        status: attentionDashboard.status,
+        approaching: hasAttention(approachingAttention.body.id, 'deadline_approaching'),
+        behind: hasAttention(behindAttention.body.id, 'behind_target_near_deadline'),
+        capacity: hasAttention(capacityAttention.body.id, 'capacity_almost_full'),
+        target: hasAttention(targetAttention.body.id, 'target_achieved'),
+        draft: hasAttention(draftAttention.body.id, 'draft_not_ready'),
+        neutral: attentionItems.some(item => item.surveyId === neutralAttention.body.id),
+        range: attentionDashboard.body.responseActivity?.rangeDays,
+        stableOrder
+      })
     );
 
     const upcomingResearch = attentionDashboard.body.upcomingResearch || [];
@@ -977,7 +1074,7 @@ async function runTests() {
       analyticsScript.raw.includes('aria-label') &&
       stylesAsset.status === 200 &&
       stylesAsset.raw.includes('.chart-actions') &&
-      stylesAsset.raw.includes('.chart-actions {\n    display: none !important;'),
+      /\.chart-actions\s*\{\s*display:\s*none\s*!important;/.test(stylesAsset.raw),
       'TEST 20h: Analytics Canvas charts expose accessible PNG downloads with print-hidden controls'
     );
 
@@ -985,9 +1082,13 @@ async function runTests() {
     console.log(`TEST SUITE RESULTS: ${passed} PASSED, ${failed} FAILED`);
     console.log('==============================================');
 
+    await stopTestServer();
+    removeTestDatabase();
     process.exit(failed > 0 ? 1 : 0);
   } catch (err) {
     console.error('Fatal test error:', err);
+    await stopTestServer();
+    removeTestDatabase();
     process.exit(1);
   }
 }

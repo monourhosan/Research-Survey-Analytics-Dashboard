@@ -34,7 +34,7 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
 
 ## 4. Main Features
 
-1. **Admin Authentication**: Secure session-based login with salted password hashing using Node.js built-in `crypto` (scrypt).
+1. **Role-Aware Authentication Foundation**: Secure session-based login with salted password hashing using Node.js built-in `crypto` (scrypt). Accounts are active/inactive and use the server-enforced `admin` or `team_member` role; the current administrator workspace remains administrator-only while Team Management UI is prepared for a later phase.
 2. **Survey Authoring & Management**:
    - Create surveys with custom titles and researcher descriptions.
    - 4 supported question types:
@@ -225,6 +225,9 @@ erDiagram
         TEXT name
         TEXT email UK
         TEXT password_hash
+        TEXT role "admin | team_member"
+        INTEGER is_active "0 or 1"
+        DATETIME last_login_at
         DATETIME created_at
     }
 
@@ -383,7 +386,8 @@ The **Automated Insight Engine** is a deterministic, rule-based inference module
 
 - **SQL Injection Prevention**: 100% of SQLite database queries use parameterized placeholders (`?`).
 - **Cross-Site Scripting (XSS) Prevention**: User-entered responses and question texts are rendered using `textContent` and HTML escaping rather than raw `innerHTML`.
-- **Credential Protection**: Passwords are never stored in plaintext. They are salted and hashed using Node's cryptographic primitives (`scrypt`).
+- **Credential Protection**: Passwords are never stored in plaintext. They are salted and hashed using Node's cryptographic primitives (`scrypt`). Existing administrator hashes are retained unchanged during the role migration.
+- **Server-side Authorization**: Every protected request reloads the account's active state from the database. Disabled accounts lose access promptly, and existing administrator APIs require the trusted `admin` role rather than a client-provided value. Team Management UI and member administration are intentionally deferred to the next Phase 3 parts.
 - **Data Integrity Protection**: Surveys that have recorded responses cannot be deleted (they must be closed instead), preventing accidental data loss.
 - **Capacity integrity**: Response-limit admission and response/answer insertion are grouped in a SQLite transaction. This protects the current single process; production multi-instance deployments need a shared transactional database to coordinate capacity globally.
 

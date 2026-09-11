@@ -18,7 +18,9 @@ const {
   dbGet,
   dbAll,
   initDatabase,
-  verifyPassword
+  verifyPassword,
+  USER_ROLES,
+  isValidUserRole
 } = require('./database');
 
 const app = express();
@@ -70,14 +72,62 @@ app.use(async (req, res, next) => {
   }
 });
 
-/**
- * Authentication Middleware: Enforces that route is only accessible by logged-in admin
- */
-function requireAuth(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    return res.status(401).json({ error: 'Unauthorized: Please log in to access this resource' });
+function safeUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role
+  };
+}
+
+async function getActiveSessionUser(req) {
+  if (!req.session || !Number.isSafeInteger(req.session.userId)) return null;
+  const user = await dbGet(
+    'SELECT id, name, email, role, is_active FROM users WHERE id = ?',
+    [req.session.userId]
+  );
+  if (!user || Number(user.is_active) !== 1 || !isValidUserRole(user.role)) return null;
+  return user;
+}
+
+function invalidateSession(req) {
+  if (req.session) req.session.destroy(() => {});
+}
+
+/** Authenticates the persisted account on every protected request. */
+async function requireAuth(req, res, next) {
+  try {
+    const user = await getActiveSessionUser(req);
+    if (!user) {
+      invalidateSession(req);
+      return res.status(401).json({ error: 'Unauthorized: Please log in to access this resource' });
+    }
+    req.currentUser = user;
+    req.session.userRole = user.role;
+    return next();
+  } catch (err) {
+    return res.status(500).json({ error: 'Unable to verify the current session.' });
   }
-  next();
+}
+
+/** Restricts existing administrator workspace APIs to trusted admin accounts. */
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await getActiveSessionUser(req);
+    if (!user) {
+      invalidateSession(req);
+      return res.status(401).json({ error: 'Unauthorized: Please log in to access this resource' });
+    }
+    if (user.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({ error: 'Forbidden: Administrator access is required.' });
+    }
+    req.currentUser = user;
+    req.session.userRole = user.role;
+    return next();
+  } catch (err) {
+    return res.status(500).json({ error: 'Unable to verify the current session.' });
+  }
 }
 
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -726,28 +776,26 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = await dbGet('SELECT * FROM users WHERE email = ?', [email.trim().toLowerCase()]);
-    if (!user) {
+    const user = await dbGet(
+      'SELECT id, name, email, password_hash, role, is_active FROM users WHERE email = ?',
+      [email.trim().toLowerCase()]
+    );
+    const isValid = user && verifyPassword(password, user.password_hash);
+    if (!isValid || Number(user.is_active) !== 1 || !isValidUserRole(user.role)) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const isValid = verifyPassword(password, user.password_hash);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    // Set session data
+    // Store only the minimal trusted identity. Name/email are always read from
+    // the active database record rather than retained in a browser session.
     req.session.userId = user.id;
-    req.session.userName = user.name;
-    req.session.userEmail = user.email;
+    req.session.userRole = user.role;
+    delete req.session.userName;
+    delete req.session.userEmail;
+    await dbRun('UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
 
     return res.json({
       success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email
-      }
+      user: safeUser(user)
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -773,19 +821,31 @@ app.post('/api/auth/logout', (req, res) => {
  * GET /api/auth/me
  * Checks current session state
  */
-app.get('/api/auth/me', (req, res) => {
-  if (req.session && req.session.userId) {
-    return res.json({
-      authenticated: true,
-      user: {
-        id: req.session.userId,
-        name: req.session.userName,
-        email: req.session.userEmail
-      }
-    });
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const user = await getActiveSessionUser(req);
+    if (!user) {
+      invalidateSession(req);
+      return res.json({ authenticated: false });
+    }
+    return res.json({ authenticated: true, user: safeUser(user) });
+  } catch (err) {
+    return res.json({ authenticated: false });
   }
-  return res.json({ authenticated: false });
 });
+
+// Current workspace APIs were historically administrator-only. Keep that
+// authorization on the server so a team member cannot gain capabilities by
+// altering the UI or request payload. Public respondent routes stay outside.
+app.use([
+  '/api/dashboard',
+  '/api/surveys',
+  '/api/workspace',
+  '/api/collections',
+  '/api/templates',
+  '/api/activity',
+  '/api/saved-views'
+], requireAdmin);
 
 /* ==========================================================================
    2. DASHBOARD API
@@ -2587,3 +2647,6 @@ module.exports.responseHeatmapLevel = responseHeatmapLevel;
 module.exports.highestTargetMilestone = highestTargetMilestone;
 module.exports.buildAchievementBadges = buildAchievementBadges;
 module.exports.buildSurveyAchievements = buildSurveyAchievements;
+module.exports.requireAuth = requireAuth;
+module.exports.requireAdmin = requireAdmin;
+module.exports.USER_ROLES = USER_ROLES;

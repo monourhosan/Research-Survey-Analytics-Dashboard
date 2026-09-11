@@ -25,9 +25,18 @@ let dbInitPromise = null;
 let writableDbPath = null;
 let saveTimeout = null;
 
+const USER_ROLES = Object.freeze({
+  ADMIN: 'admin',
+  TEAM_MEMBER: 'team_member'
+});
+const VALID_USER_ROLES = new Set(Object.values(USER_ROLES));
+
 // Determine possible database paths
 const localDataDir = path.join(__dirname, 'data');
-const localDbPath = path.join(localDataDir, 'survey.db');
+const configuredDbPath = typeof process.env.SURVEY_DB_PATH === 'string' && process.env.SURVEY_DB_PATH.trim()
+  ? path.resolve(process.env.SURVEY_DB_PATH.trim())
+  : null;
+const localDbPath = configuredDbPath || path.join(localDataDir, 'survey.db');
 
 // Detect serverless / edge runtime
 const isServerless = process.env.VERCEL === '1' ||
@@ -39,6 +48,7 @@ const isServerless = process.env.VERCEL === '1' ||
  * Determine the most suitable database storage location
  */
 function resolveStoragePath() {
+  if (configuredDbPath) return configuredDbPath;
   if (isServerless) {
     return path.join(os.tmpdir(), 'survey.db');
   }
@@ -196,9 +206,42 @@ async function initDatabase() {
           name TEXT NOT NULL,
           email TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'team_member')),
+          is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+          created_by_user_id INTEGER,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_login_at DATETIME,
+          must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
         );
       `);
+
+      // Backward-compatible, idempotent migration from the original single-admin table.
+      // Existing salted password hashes are intentionally left untouched.
+      const userColumns = await dbAll('PRAGMA table_info(users)');
+      if (!userColumns.some(column => column.name === 'role')) {
+        db.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
+      }
+      if (!userColumns.some(column => column.name === 'is_active')) {
+        db.run('ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
+      }
+      if (!userColumns.some(column => column.name === 'created_by_user_id')) {
+        db.run('ALTER TABLE users ADD COLUMN created_by_user_id INTEGER');
+      }
+      if (!userColumns.some(column => column.name === 'updated_at')) {
+        db.run('ALTER TABLE users ADD COLUMN updated_at DATETIME');
+      }
+      if (!userColumns.some(column => column.name === 'last_login_at')) {
+        db.run('ALTER TABLE users ADD COLUMN last_login_at DATETIME');
+      }
+      if (!userColumns.some(column => column.name === 'must_change_password')) {
+        db.run('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+      }
+      db.run("UPDATE users SET role = 'admin' WHERE role IS NULL OR TRIM(role) = '' OR role NOT IN ('admin', 'team_member')");
+      db.run('UPDATE users SET is_active = 1 WHERE is_active IS NULL');
+      db.run('UPDATE users SET must_change_password = 0 WHERE must_change_password IS NULL');
+      db.run('UPDATE users SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL');
 
       db.run(`
         CREATE TABLE IF NOT EXISTS surveys (
@@ -299,6 +342,7 @@ async function initDatabase() {
       db.run('CREATE INDEX IF NOT EXISTS idx_notes_survey ON survey_notes(survey_id, created_at DESC)');
       db.run('CREATE INDEX IF NOT EXISTS idx_activity_survey ON activity_logs(survey_id, created_at DESC)');
       db.run('CREATE INDEX IF NOT EXISTS idx_saved_views_type ON saved_views(view_type, survey_id)');
+      db.run('CREATE INDEX IF NOT EXISTS idx_users_active_role ON users(is_active, role)');
 
       db.run(`
         CREATE TABLE IF NOT EXISTS questions (
@@ -340,10 +384,13 @@ async function initDatabase() {
         const defaultPassword = 'Admin123!';
         const passwordHash = hashPassword(defaultPassword);
         await dbRun(
-          'INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)',
-          ['Research Admin', adminEmail, passwordHash]
+          'INSERT INTO users (name, email, password_hash, role, is_active, updated_at) VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)',
+          ['Research Admin', adminEmail, passwordHash, USER_ROLES.ADMIN]
         );
         console.log(`[SEED] Demo administrator created: ${adminEmail} (password: ${defaultPassword})`);
+      } else {
+        // The original demo administrator remains usable after every migration run.
+        await dbRun("UPDATE users SET role = ?, is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [USER_ROLES.ADMIN, existingAdmin.id]);
       }
 
       // 6. Auto-seed demo survey if surveys table is empty
@@ -490,6 +537,40 @@ function verifyPassword(password, storedHash) {
   }
 }
 
+function isValidUserRole(role) {
+  return VALID_USER_ROLES.has(role);
+}
+
+function normalizeUserRole(role) {
+  return isValidUserRole(role)
+    ? { value: role }
+    : { error: 'User role must be admin or team_member.' };
+}
+
+/**
+ * Creates a role-aware account for trusted server-side workflows. Team member
+ * management endpoints are deliberately deferred to Phase 3 Part 13.
+ */
+async function createUserAccount({ name, email, password, role = USER_ROLES.TEAM_MEMBER, createdByUserId = null, mustChangePassword = false }) {
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const normalizedRole = normalizeUserRole(role);
+  if (!normalizedName || normalizedName.length > 120) throw new Error('A valid display name is required.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) throw new Error('A valid email is required.');
+  if (typeof password !== 'string' || password.length < 8) throw new Error('Password must contain at least 8 characters.');
+  if (normalizedRole.error) throw new Error(normalizedRole.error);
+
+  const result = await dbRun(
+    `INSERT INTO users (name, email, password_hash, role, is_active, created_by_user_id, updated_at, must_change_password)
+     VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, ?)`,
+    [normalizedName, normalizedEmail, hashPassword(password), normalizedRole.value, createdByUserId, mustChangePassword ? 1 : 0]
+  );
+  return dbGet(
+    'SELECT id, name, email, role, is_active, created_at, updated_at, last_login_at, must_change_password FROM users WHERE id = ?',
+    [result.lastID]
+  );
+}
+
 /**
  * Auto-seed sample survey with questions and 25 realistic responses
  */
@@ -606,5 +687,9 @@ module.exports = {
   initDatabase,
   hashPassword,
   verifyPassword,
+  USER_ROLES,
+  isValidUserRole,
+  normalizeUserRole,
+  createUserAccount,
   persistDatabase
 };

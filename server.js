@@ -11,7 +11,6 @@
  */
 
 const express = require('express');
-const session = require('express-session');
 const path = require('path');
 const crypto = require('crypto');
 const {
@@ -36,19 +35,77 @@ app.use(express.urlencoded({ extended: true }));
 // Trust proxy (required for session cookies behind Vercel / Edge reverse proxies)
 app.set('trust proxy', 1);
 
-// Session configuration
-app.use(
-  session({
-    secret: 'cse499-research-survey-secret-key-2026',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+// A process-memory session store causes login loops when a hosted app restarts
+// or serves two requests from different workers. Keep only a signed user ID in
+// the cookie and reload the active account from SQLite on every protected call.
+const SESSION_COOKIE_NAME = 'rsad_session';
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_SECRET = process.env.SESSION_SECRET || 'cse499-research-survey-secret-key-2026';
+
+function parseCookies(header) {
+  return String(header || '').split(';').reduce((cookies, part) => {
+    const separator = part.indexOf('=');
+    if (separator > 0) cookies[part.slice(0, separator).trim()] = decodeURIComponent(part.slice(separator + 1).trim());
+    return cookies;
+  }, {});
+}
+
+function signSessionPayload(payload) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+}
+
+function readSignedSession(value) {
+  if (typeof value !== 'string') return null;
+  const separator = value.lastIndexOf('.');
+  if (separator < 1) return null;
+  const payload = value.slice(0, separator);
+  const suppliedSignature = value.slice(separator + 1);
+  const expectedSignature = signSessionPayload(payload);
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(suppliedSignature), Buffer.from(expectedSignature))) return null;
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!Number.isSafeInteger(decoded.userId) || decoded.userId <= 0 || !Number.isSafeInteger(decoded.expiresAt) || decoded.expiresAt <= Date.now()) return null;
+    return { userId: decoded.userId };
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeSignedSession(userId) {
+  const payload = Buffer.from(JSON.stringify({ userId, expiresAt: Date.now() + SESSION_MAX_AGE_MS })).toString('base64url');
+  return `${payload}.${signSessionPayload(payload)}`;
+}
+
+function portableSession(req, res, next) {
+  let state = readSignedSession(parseCookies(req.headers.cookie)[SESSION_COOKIE_NAME]) || {};
+  let changed = false;
+  let destroyed = false;
+  const sessionState = new Proxy({}, {
+    get(_target, property) {
+      if (property === 'destroy') return callback => { destroyed = true; state = {}; changed = false; if (typeof callback === 'function') callback(null); };
+      if (property === 'regenerate') return callback => { destroyed = false; state = {}; changed = true; if (typeof callback === 'function') callback(null); };
+      return state[property];
+    },
+    set(_target, property, value) { state[property] = value; changed = true; return true; },
+    deleteProperty(_target, property) { delete state[property]; changed = true; return true; },
+    has(_target, property) { return property in state; }
+  });
+  req.session = sessionState;
+  const originalEnd = res.end;
+  res.end = function portableSessionEnd(...args) {
+    if (destroyed) {
+      res.clearCookie(SESSION_COOKIE_NAME, { path: '/', sameSite: 'lax', httpOnly: true });
+    } else if (changed && Number.isSafeInteger(state.userId) && state.userId > 0) {
+      res.cookie(SESSION_COOKIE_NAME, writeSignedSession(state.userId), {
+        path: '/', httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: SESSION_MAX_AGE_MS
+      });
     }
-  })
-);
+    return originalEnd.apply(this, args);
+  };
+  next();
+}
+
+app.use(portableSession);
 
 // Serve static frontend assets
 app.use(express.static(path.join(__dirname, 'public')));

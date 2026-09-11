@@ -2457,11 +2457,6 @@ body.admin-page {
 .research-command-center-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 17px; }
 .research-command-center-actions .btn { min-height: 38px; padding-inline: 13px; border-radius: 9px; font-size: 12px; }
 .research-command-center-actions .btn span { font-size: 15px; line-height: 1; }
-.research-command-center-status { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; margin: 0 0 3px; padding: 7px 10px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface); color: var(--color-text-muted); font-size: 11px; font-weight: 750; white-space: nowrap; }
-.research-command-center-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-muted); }
-.research-command-center[data-workspace-state="ready"] .research-command-center-status-dot { background: var(--color-primary); }
-.research-command-center[data-workspace-state="error"] .research-command-center-status { border-style: dashed; }
-
 .dashboard-metrics { gap: 14px; margin-bottom: 19px; }
 .dashboard-metric-card { min-height: 174px; display: flex; flex-direction: column; padding: 18px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); box-shadow: 0 8px 20px rgba(35, 31, 24, .045); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
 .dashboard-metric-card::after { display: none; }
@@ -2540,7 +2535,6 @@ body.admin-page {
 
 @media (max-width: 720px) {
   .research-command-center { align-items: flex-start; flex-direction: column; gap: 17px; padding: 21px; }
-  .research-command-center-status { margin: 0; }
   .dashboard-metrics { gap: 10px; }
   .dashboard-metric-card { min-height: 150px; }
   .dashboard-attention-header { align-items: flex-start; padding: 18px; }
@@ -2555,7 +2549,6 @@ body.admin-page {
   .research-command-center { padding: 18px; }
   .research-command-center-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
   .research-command-center-actions .btn { justify-content: center; }
-  .research-command-center-status { white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {

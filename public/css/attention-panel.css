@@ -149,8 +149,6 @@
 .dashboard-response-pulse-header { align-items: flex-end; padding: 20px 22px; border-bottom: 1px solid var(--color-border); }
 .dashboard-response-pulse-header .card-title { margin-top: 1px; font-size: 18px; letter-spacing: -.025em; }
 .dashboard-response-pulse-header .card-subtitle { margin-top: 4px; }
-.response-pulse-status { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface-secondary); color: var(--color-text-muted); font-size: 10px; font-weight: 800; white-space: nowrap; }
-.response-pulse-status.is-collecting { border-color: var(--color-primary); background: var(--palette-cream); color: var(--color-primary); }
 .response-pulse-body { padding: 18px 22px 17px; }
 .response-pulse-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .response-pulse-metrics > div { padding: 12px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-secondary); }

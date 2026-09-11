@@ -1073,7 +1073,7 @@ async function runTests() {
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
       dashboardPage.raw.includes('research-command-center') && dashboardPage.raw.includes('command-center-greeting') &&
-      dashboardPage.raw.includes('command-center-summary') && dashboardPage.raw.includes('command-center-status') &&
+      dashboardPage.raw.includes('command-center-summary') && !dashboardPage.raw.includes('command-center-status') &&
       dashboardPage.raw.includes('surveys.html?quickAction=analytics') &&
       dashboardPage.raw.includes('js/metric-animation.js') &&
       dashboardPage.raw.includes('weekly-challenge-card') && dashboardPage.raw.includes('weekly-challenge-progress') &&
@@ -1089,6 +1089,7 @@ async function runTests() {
       dashboardPage.raw.includes('surveys.html?quickAction=collection') && dashboardPage.raw.includes('surveys.html?quickAction=compare') &&
       dashboardPage.raw.includes('surveys.html?quickAction=analytics') && dashboardPage.raw.includes('Live Response Pulse') &&
       dashboardPage.raw.includes('response-pulse-today') && dashboardPage.raw.includes('response-pulse-last-hour') &&
+      !dashboardPage.raw.includes('response-pulse-status') &&
       dashboardPage.raw.includes('Research Health') && dashboardPage.raw.includes('research-health-list') &&
       dashboardScript.status === 200 && dashboardScript.raw.includes('renderAttentionItems') &&
       dashboardScript.raw.includes('initializeCommandPalette') && dashboardScript.raw.includes('loadPaletteSurveys') &&

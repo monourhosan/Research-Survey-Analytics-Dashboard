@@ -78,22 +78,18 @@ function setCommandCenterIdentity(user) {
 function renderCommandCenterSummary(data) {
   const commandCenter = document.getElementById('research-command-center');
   const summary = document.getElementById('command-center-summary');
-  const status = document.getElementById('command-center-status');
-  if (!commandCenter || !summary || !status) return;
+  if (!commandCenter || !summary) return;
   const activeSurveys = commandCenterCount(data?.activeSurveys);
   const totalResponses = commandCenterCount(data?.totalResponses);
   summary.textContent = `${commandCenterLabel(activeSurveys, 'active survey')} · ${commandCenterLabel(totalResponses, 'total response')}`;
-  status.textContent = 'Workspace ready';
   commandCenter.dataset.workspaceState = 'ready';
 }
 
 function renderCommandCenterError() {
   const commandCenter = document.getElementById('research-command-center');
   const summary = document.getElementById('command-center-summary');
-  const status = document.getElementById('command-center-status');
-  if (!commandCenter || !summary || !status) return;
+  if (!commandCenter || !summary) return;
   summary.textContent = 'Your research summary could not be loaded.';
-  status.textContent = 'Workspace data unavailable';
   commandCenter.dataset.workspaceState = 'error';
 }
 
@@ -650,7 +646,6 @@ function renderResponsePulse(pulse) {
   }
 
   const card = document.querySelector('.dashboard-response-pulse-card');
-  const status = document.getElementById('response-pulse-status');
   const latest = document.getElementById('response-pulse-latest');
   const hint = document.getElementById('response-pulse-hint');
   const delta = responsePulseDelta(responsePulseBaseline, totalResponses);
@@ -660,14 +655,6 @@ function renderResponsePulse(pulse) {
   card.setAttribute('aria-busy', 'false');
   document.getElementById('response-pulse-today').textContent = todayCount;
   document.getElementById('response-pulse-last-hour').textContent = lastHourCount;
-  if (activeSurveyCount > 0) {
-    status.textContent = `Collecting · Auto-refreshing`;
-    status.className = 'response-pulse-status is-collecting';
-  } else {
-    status.textContent = 'No active surveys';
-    status.className = 'response-pulse-status';
-  }
-
   const responseTime = pulse.latestResponseAt ? activityTimeDetails(pulse.latestResponseAt) : null;
   latest.textContent = responseTime ? responseTime.relative : 'No responses yet';
   if (responseTime?.absolute) {
@@ -697,11 +684,8 @@ function announceResponsePulseDelta(delta) {
 
 function renderResponsePulseError() {
   const card = document.querySelector('.dashboard-response-pulse-card');
-  const status = document.getElementById('response-pulse-status');
   const hint = document.getElementById('response-pulse-hint');
   card?.setAttribute('aria-busy', 'false');
-  status.textContent = 'Refresh delayed';
-  status.className = 'response-pulse-status';
   hint.textContent = 'Latest refresh failed; showing the last known response data.';
   hint.className = 'response-pulse-hint is-stale';
 }

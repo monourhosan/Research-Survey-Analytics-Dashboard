@@ -2478,14 +2478,14 @@ body.admin-page {
 .research-command-center[data-workspace-state="error"] .research-command-center-status { border-style: dashed; }
 
 .dashboard-metrics { gap: 14px; margin-bottom: 19px; }
-.dashboard-metric-card { min-height: 174px; display: flex; flex-direction: column; padding: 18px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); box-shadow: 0 8px 20px rgba(35, 31, 24, .045); }
+.dashboard-metric-card { min-height: 174px; display: flex; flex-direction: column; padding: 18px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); box-shadow: 0 8px 20px rgba(35, 31, 24, .045); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
 .dashboard-metric-card::after { display: none; }
 .dashboard-metric-card:hover { transform: translateY(-2px); box-shadow: 0 13px 26px rgba(35, 31, 24, .09); }
 .metric-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: auto; }
 .metric-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--color-background); color: var(--color-primary); font-size: 16px; font-weight: 800; }
 .metric-trend { color: var(--color-text-muted); font-size: 10px; font-weight: 700; }
 .dashboard-metric-card .metric-label { margin-top: 17px; color: var(--color-text-muted); font-size: 10px; font-weight: 800; letter-spacing: .07em; }
-.dashboard-metric-card .metric-value { margin: 5px 0 4px; color: var(--color-primary); font-size: 33px; line-height: 1; }
+.dashboard-metric-card .metric-value { margin: 5px 0 4px; color: var(--color-primary); font-size: 33px; line-height: 1; font-variant-numeric: tabular-nums; }
 .dashboard-metric-card .metric-meta { color: var(--color-text-muted); font-size: 11px; }
 .metric-card-highlight { border-color: var(--color-primary); background: var(--color-primary); color: var(--palette-cream); }
 .metric-card-highlight .metric-icon { background: var(--palette-cream); color: var(--color-primary); }
@@ -2538,6 +2538,11 @@ body.admin-page {
   .research-command-center-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
   .research-command-center-actions .btn { justify-content: center; }
   .research-command-center-status { white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-metric-card,
+  .dashboard-metric-card:hover { transform: none; transition: none; }
 }
 
 @media (max-width: 560px) {

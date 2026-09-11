@@ -29,6 +29,11 @@ const {
   evaluateMilestoneAcknowledgements
 } = require('./public/js/milestones.js');
 const {
+  animateMetric,
+  formatMetricValue,
+  normalizeMetricValue
+} = require('./public/js/metric-animation.js');
+const {
   getResponseActivityWindow,
   getResponsePulseWindow,
   responseHeatmapLevel,
@@ -1051,11 +1056,13 @@ async function runTests() {
 
     const dashboardPage = await request('GET', '/dashboard.html');
     const dashboardScript = await request('GET', '/js/dashboard.js');
+    const metricAnimationScript = await request('GET', '/js/metric-animation.js');
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
       dashboardPage.raw.includes('research-command-center') && dashboardPage.raw.includes('command-center-greeting') &&
       dashboardPage.raw.includes('command-center-summary') && dashboardPage.raw.includes('command-center-status') &&
       dashboardPage.raw.includes('surveys.html?quickAction=analytics') &&
+      dashboardPage.raw.includes('js/metric-animation.js') &&
       dashboardPage.raw.includes('command-palette-dialog') && dashboardPage.raw.includes('command-palette-input') &&
       dashboardPage.raw.includes('Milestones &amp; Achievements') && dashboardPage.raw.includes('milestone-achievements-list') &&
       dashboardPage.raw.includes('Response Calendar') && dashboardPage.raw.includes('response-heatmap-grid') &&
@@ -1079,6 +1086,57 @@ async function runTests() {
       dashboardScript.raw.includes('renderActivityTimeline') && dashboardScript.raw.includes('No recent workspace activity yet.') &&
       dashboardScript.raw.includes('activityTimeDetails') && dashboardScript.raw.includes('AbortController'),
       'TEST 20b1: Dashboard command palette, calendar, attention, response activity, upcoming-research, timeline, quick-action, and pulse assets load'
+    );
+    assert(
+      metricAnimationScript.status === 200 && metricAnimationScript.raw.includes('animateMetric') &&
+      dashboardScript.raw.includes('renderDashboardMetrics'),
+      'TEST 20b1c: Dashboard KPI animation utility and integration asset load'
+    );
+
+    const metricElement = {
+      textContent: '0',
+      dataset: {},
+      classList: { toggle() {} }
+    };
+    const frames = [];
+    animateMetric(metricElement, 1284, {
+      duration: 750,
+      requestAnimationFrame(callback) {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelAnimationFrame() {}
+    });
+    frames.shift()(0);
+    frames.shift()(750);
+    assert(
+      normalizeMetricValue(null) === 0 && normalizeMetricValue(-2) === 0 &&
+      normalizeMetricValue(9.8) === 9 && formatMetricValue(1284, 'en-US') === '1,284' &&
+      metricElement.textContent === '1,284',
+      'TEST 20b1a: Dashboard KPI counter formats safe integers and ends exactly at the server value'
+    );
+    animateMetric(metricElement, 1, { reducedMotion: true });
+    assert(metricElement.textContent === '1', 'TEST 20b1b: Dashboard KPI counter respects reduced motion');
+
+    const refreshedMetric = { textContent: '0', dataset: {}, classList: { toggle() {} } };
+    const refreshedFrames = [];
+    const cancelledFrames = [];
+    const animationOptions = {
+      duration: 750,
+      requestAnimationFrame(callback) {
+        refreshedFrames.push(callback);
+        return refreshedFrames.length;
+      },
+      cancelAnimationFrame(frameId) { cancelledFrames.push(frameId); }
+    };
+    animateMetric(refreshedMetric, 100, animationOptions);
+    animateMetric(refreshedMetric, 200, animationOptions);
+    refreshedFrames[0](750);
+    refreshedFrames[1](0);
+    refreshedFrames[2](750);
+    assert(
+      cancelledFrames.includes(1) && refreshedMetric.textContent === '200',
+      'TEST 20b1d: Dashboard KPI counter supersedes an in-flight refresh without flicker'
     );
 
     const surveyWorkspaceScript = await request('GET', '/js/surveys.js');

@@ -97,6 +97,25 @@ function renderCommandCenterError() {
   commandCenter.dataset.workspaceState = 'error';
 }
 
+function renderDashboardMetrics(data) {
+  const metricValues = [
+    ['stat-total-surveys', data?.totalSurveys],
+    ['stat-active-surveys', data?.activeSurveys],
+    ['stat-closed-surveys', data?.closedSurveys],
+    ['stat-total-responses', data?.totalResponses]
+  ];
+  const animateMetric = window.DashboardMetricUtils?.animateMetric;
+  metricValues.forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    if (typeof animateMetric === 'function') {
+      animateMetric(element, value);
+    } else {
+      element.textContent = String(Number.isFinite(Number(value)) && Number(value) >= 0 ? Math.floor(Number(value)) : 0);
+    }
+  });
+}
+
 function workspaceActions() {
   return window.CommandPaletteUtils?.getWorkspaceActions?.() || [];
 }
@@ -286,10 +305,7 @@ async function loadDashboardData() {
     const data = await res.json();
 
     // Populate metric cards
-    document.getElementById('stat-total-surveys').textContent = data.totalSurveys || 0;
-    document.getElementById('stat-active-surveys').textContent = data.activeSurveys || 0;
-    document.getElementById('stat-closed-surveys').textContent = data.closedSurveys || 0;
-    document.getElementById('stat-total-responses').textContent = data.totalResponses || 0;
+    renderDashboardMetrics(data);
     renderCommandCenterSummary(data);
     renderAttentionItems(data.attentionItems || [], data.totalAttentionItems || 0);
     renderUpcomingResearch(data.upcomingResearch || []);

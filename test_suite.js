@@ -34,6 +34,13 @@ const {
   normalizeMetricValue
 } = require('./public/js/metric-animation.js');
 const {
+  getUtcWeekStartKey,
+  nextWeeklyTarget,
+  resolveWeeklyChallenge,
+  weeklyChallengeMessage,
+  weeklyResponseCount
+} = require('./public/js/weekly-challenge.js');
+const {
   getResponseActivityWindow,
   getResponsePulseWindow,
   responseHeatmapLevel,
@@ -1057,12 +1064,15 @@ async function runTests() {
     const dashboardPage = await request('GET', '/dashboard.html');
     const dashboardScript = await request('GET', '/js/dashboard.js');
     const metricAnimationScript = await request('GET', '/js/metric-animation.js');
+    const weeklyChallengeScript = await request('GET', '/js/weekly-challenge.js');
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
       dashboardPage.raw.includes('research-command-center') && dashboardPage.raw.includes('command-center-greeting') &&
       dashboardPage.raw.includes('command-center-summary') && dashboardPage.raw.includes('command-center-status') &&
       dashboardPage.raw.includes('surveys.html?quickAction=analytics') &&
       dashboardPage.raw.includes('js/metric-animation.js') &&
+      dashboardPage.raw.includes('weekly-challenge-card') && dashboardPage.raw.includes('weekly-challenge-progress') &&
+      dashboardPage.raw.includes('js/weekly-challenge.js') &&
       dashboardPage.raw.includes('command-palette-dialog') && dashboardPage.raw.includes('command-palette-input') &&
       dashboardPage.raw.includes('Milestones &amp; Achievements') && dashboardPage.raw.includes('milestone-achievements-list') &&
       dashboardPage.raw.includes('Response Calendar') && dashboardPage.raw.includes('response-heatmap-grid') &&
@@ -1091,6 +1101,39 @@ async function runTests() {
       metricAnimationScript.status === 200 && metricAnimationScript.raw.includes('animateMetric') &&
       dashboardScript.raw.includes('renderDashboardMetrics'),
       'TEST 20b1c: Dashboard KPI animation utility and integration asset load'
+    );
+    assert(
+      weeklyChallengeScript.status === 200 && weeklyChallengeScript.raw.includes('resolveWeeklyChallenge') &&
+      dashboardScript.raw.includes('renderWeeklyChallenge'),
+      'TEST 20b1e: Weekly research challenge utility and dashboard integration asset load'
+    );
+    const sundayUtc = new Date('2026-09-13T23:59:59.000Z');
+    const mondayUtc = new Date('2026-09-14T00:00:00.000Z');
+    const challengeDays = [
+      { date: '2026-09-07', count: 2 },
+      { date: '2026-09-13', count: 3 },
+      { date: '2026-09-14', count: 20 }
+    ];
+    const challengeStorageValues = new Map();
+    const challengeStorage = {
+      getItem(key) { return challengeStorageValues.get(key) || null; },
+      setItem(key, value) { challengeStorageValues.set(key, value); }
+    };
+    const firstWeeklyChallenge = resolveWeeklyChallenge(0, sundayUtc, challengeStorage);
+    const persistedWeeklyChallenge = resolveWeeklyChallenge(4, sundayUtc, challengeStorage);
+    const completedWeeklyChallenge = resolveWeeklyChallenge(8, sundayUtc, challengeStorage);
+    const malformedStorageChallenge = resolveWeeklyChallenge(1120, new Date('2026-09-21T00:00:00.000Z'), {
+      getItem() { return 'not-a-number'; },
+      setItem() { throw new Error('storage unavailable'); }
+    });
+    assert(
+      getUtcWeekStartKey(sundayUtc) === '2026-09-07' && getUtcWeekStartKey(mondayUtc) === '2026-09-14' &&
+      weeklyResponseCount(challengeDays, sundayUtc) === 5 && weeklyResponseCount(challengeDays, mondayUtc) === 20 &&
+      firstWeeklyChallenge.target === 5 && persistedWeeklyChallenge.target === 5 &&
+      completedWeeklyChallenge.complete && completedWeeklyChallenge.percentage === 100 &&
+      nextWeeklyTarget(1120) === 1500 && malformedStorageChallenge.target === 1500 &&
+      weeklyChallengeMessage({ current: 0, target: 5, percentage: 0, complete: false }) === 'Your weekly challenge is ready.',
+      'TEST 20b1f: Weekly challenge uses UTC Monday weeks, stable targets, safe storage, and accurate completion'
     );
 
     const metricElement = {

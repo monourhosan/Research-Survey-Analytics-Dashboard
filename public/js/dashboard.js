@@ -116,6 +116,53 @@ function renderDashboardMetrics(data) {
   });
 }
 
+function renderWeeklyChallenge(responseHeatmap) {
+  const card = document.getElementById('weekly-challenge-card');
+  const description = document.getElementById('weekly-challenge-description');
+  const state = document.getElementById('weekly-challenge-state');
+  const count = document.getElementById('weekly-challenge-count');
+  const percent = document.getElementById('weekly-challenge-percent');
+  const progress = document.getElementById('weekly-challenge-progress');
+  const message = document.getElementById('weekly-challenge-message');
+  if (!card || !description || !state || !count || !percent || !progress || !message || !window.WeeklyChallengeUtils) return;
+  const { weeklyResponseCount, resolveWeeklyChallenge, weeklyChallengeMessage } = window.WeeklyChallengeUtils;
+  const challenge = resolveWeeklyChallenge(weeklyResponseCount(responseHeatmap?.days));
+  const responseWord = challenge.current === 1 ? 'response' : 'responses';
+  card.setAttribute('aria-busy', 'false');
+  card.dataset.challengeState = challenge.complete ? 'complete' : 'active';
+  description.textContent = `Collect ${challenge.target} responses this UTC week (Monday–Sunday).`;
+  state.textContent = challenge.complete ? 'Completed' : (challenge.current === 0 ? 'Ready' : 'In progress');
+  count.textContent = `${challenge.current.toLocaleString()} / ${challenge.target.toLocaleString()} ${responseWord}`;
+  percent.textContent = `${challenge.percentage}%`;
+  progress.value = challenge.percentage;
+  progress.textContent = `${challenge.percentage}%`;
+  message.textContent = challenge.complete
+    ? `Great work — this week's dashboard goal is complete with ${challenge.current.toLocaleString()} ${responseWord}.`
+    : weeklyChallengeMessage(challenge);
+}
+
+function renderWeeklyChallengeError() {
+  const card = document.getElementById('weekly-challenge-card');
+  const description = document.getElementById('weekly-challenge-description');
+  const state = document.getElementById('weekly-challenge-state');
+  const count = document.getElementById('weekly-challenge-count');
+  const percent = document.getElementById('weekly-challenge-percent');
+  const progress = document.getElementById('weekly-challenge-progress');
+  const message = document.getElementById('weekly-challenge-message');
+  if (!card || !description || !state || !message) return;
+  card.setAttribute('aria-busy', 'false');
+  card.dataset.challengeState = 'error';
+  description.textContent = 'This UTC week’s response goal could not be loaded.';
+  state.textContent = 'Unavailable';
+  if (count) count.textContent = '— / — responses';
+  if (percent) percent.textContent = '—%';
+  if (progress) {
+    progress.value = 0;
+    progress.textContent = '0%';
+  }
+  message.textContent = 'Refresh the dashboard to try again.';
+}
+
 function workspaceActions() {
   return window.CommandPaletteUtils?.getWorkspaceActions?.() || [];
 }
@@ -311,6 +358,7 @@ async function loadDashboardData() {
     renderUpcomingResearch(data.upcomingResearch || []);
     renderResponseActivity(data.responseActivity);
     renderResponseHeatmap(data.responseHeatmap);
+    renderWeeklyChallenge(data.responseHeatmap);
     renderResponsePulse(data.responsePulse);
     renderResearchHealth(data.researchHealth || []);
     renderSurveyAchievements(data.surveyAchievements || []);
@@ -398,6 +446,7 @@ async function loadDashboardData() {
     renderUpcomingResearchError();
     renderResponseActivityError();
     renderResponseHeatmapError();
+    renderWeeklyChallengeError();
     renderActivityTimelineError();
     renderResponsePulseError();
     renderResearchHealthError();

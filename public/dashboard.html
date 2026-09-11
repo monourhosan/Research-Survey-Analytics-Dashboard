@@ -120,6 +120,23 @@
           </article>
         </section>
 
+        <section class="card weekly-challenge-card" id="weekly-challenge-card" aria-labelledby="weekly-challenge-title" aria-busy="true">
+          <div class="weekly-challenge-header">
+            <div>
+              <span class="page-kicker">Weekly challenge</span>
+              <h2 id="weekly-challenge-title">Research Goal</h2>
+              <p id="weekly-challenge-description">Loading this UTC week's response goal…</p>
+            </div>
+            <span id="weekly-challenge-state" class="weekly-challenge-state">Loading</span>
+          </div>
+          <div class="weekly-challenge-progress-copy">
+            <strong id="weekly-challenge-count">— / — responses</strong>
+            <span id="weekly-challenge-percent">—%</span>
+          </div>
+          <progress id="weekly-challenge-progress" class="weekly-challenge-progress" value="0" max="100" aria-label="Weekly research challenge progress">0%</progress>
+          <p id="weekly-challenge-message" class="weekly-challenge-message" role="status" aria-live="polite">Preparing your weekly challenge…</p>
+        </section>
+
         <section class="card dashboard-response-pulse-card" aria-labelledby="response-pulse-title" aria-busy="true">
           <div class="card-header dashboard-response-pulse-header">
             <div>
@@ -352,6 +369,7 @@
   <script src="js/command-palette.js"></script>
   <script src="js/milestones.js"></script>
   <script src="js/metric-animation.js"></script>
+  <script src="js/weekly-challenge.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
 </html>

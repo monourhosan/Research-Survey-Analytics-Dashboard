@@ -2493,6 +2493,25 @@ body.admin-page {
 .metric-card-highlight .metric-meta { opacity: .7; }
 
 .dashboard-recent-card { overflow: hidden; border-radius: 16px; }
+.dashboard-attention-card { margin: 0 0 19px; overflow: hidden; border-radius: 16px; }
+.dashboard-attention-header { align-items: flex-end; padding: 20px 22px; border-bottom: 1px solid var(--color-border); }
+.dashboard-attention-header .card-title { margin-top: 1px; font-size: 18px; letter-spacing: -.025em; }
+.dashboard-attention-header .card-subtitle { max-width: 660px; margin-top: 4px; }
+.attention-count { min-width: 34px; height: 28px; padding: 0 9px; border: 1px solid var(--color-primary); border-radius: 999px; display: inline-grid; place-items: center; background: var(--color-primary); color: var(--palette-cream); font-size: 12px; font-weight: 800; }
+.attention-list { padding: 4px 22px 10px; }
+.attention-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--color-border); }
+.attention-item:last-of-type { border-bottom: 0; }
+.attention-indicator { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: 50%; background: var(--color-surface-secondary); color: var(--color-primary); font-size: 13px; font-weight: 900; }
+.attention-critical .attention-indicator, .attention-high .attention-indicator { background: var(--color-primary); color: var(--palette-cream); border-color: var(--color-primary); }
+.attention-success .attention-indicator { background: var(--palette-cream); border-style: dashed; }
+.attention-item-copy { min-width: 0; }
+.attention-item-copy h3 { margin: 0; color: var(--color-text); font-size: 13px; font-weight: 800; line-height: 1.3; }
+.attention-item-copy p { margin: 2px 0 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.45; }
+.attention-context { display: block; margin-top: 4px; color: var(--color-text-muted); font-size: 11px; font-weight: 700; }
+.attention-action { white-space: nowrap; }
+.attention-empty-state { min-height: 88px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 3px; padding: 18px; color: var(--color-text-muted); text-align: center; font-size: 12px; }
+.attention-empty-state strong { color: var(--color-text); font-size: 13px; }
+.attention-more { margin: 5px 0 0; color: var(--color-text-muted); font-size: 11px; font-weight: 700; }
 .dashboard-recent-card .card-header { align-items: flex-end; padding: 20px 22px; }
 .dashboard-recent-card .card-title { margin-top: 1px; font-size: 18px; letter-spacing: -.025em; }
 .dashboard-recent-card .card-subtitle { margin-top: 4px; }
@@ -2504,7 +2523,14 @@ body.admin-page {
   .dashboard-text-link { padding-bottom: 0; }
   .dashboard-metrics { gap: 10px; }
   .dashboard-metric-card { min-height: 150px; }
+  .dashboard-attention-header { align-items: flex-start; padding: 18px; }
+  .attention-list { padding-inline: 18px; }
   .dashboard-recent-card .card-header { align-items: flex-start; padding: 18px; }
+}
+
+@media (max-width: 560px) {
+  .attention-item { grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 10px; }
+  .attention-action { grid-column: 2; justify-self: start; margin-top: -2px; }
 }
 
 /* ===== REDESIGNED SURVEY MANAGEMENT ===== */
@@ -2523,6 +2549,7 @@ body.admin-page {
 .survey-inventory-card .card-header { padding: 20px 22px; }
 .survey-inventory-card .card-title { margin-top: 1px; font-size: 18px; letter-spacing: -.025em; }
 .survey-inventory-card .card-subtitle { margin-top: 4px; }
+.workspace-quick-action-guidance { margin: 14px 22px 0; padding: 10px 12px; border: 1px solid var(--color-primary); border-radius: 9px; background: var(--palette-cream); color: var(--color-text); font-size: 12px; font-weight: 700; line-height: 1.45; }
 .survey-inventory-card .survey-list-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(150px, 190px) auto; align-items: end; gap: 12px; padding: 16px 22px; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); background: var(--color-background); }
 .survey-inventory-card .survey-filter-field { margin: 0; }
 .survey-inventory-card .survey-filter-field > span { display: block; margin-bottom: 6px; color: var(--color-text-muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -2544,6 +2571,7 @@ body.admin-page {
 @media (max-width: 560px) {
   .survey-inventory-card .card-header,
   .survey-inventory-card .survey-list-toolbar { padding-right: 16px; padding-left: 16px; }
+  .workspace-quick-action-guidance { margin-right: 16px; margin-left: 16px; }
   .survey-inventory-card .survey-list-toolbar { grid-template-columns: 1fr; gap: 10px; }
   .survey-inventory-card .survey-filter-count { grid-column: auto; }
 }

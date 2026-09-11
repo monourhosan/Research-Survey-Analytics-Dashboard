@@ -55,6 +55,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   builderReadyForLocalDrafts = true;
   offerLocalDraftRecovery();
+
+  if (!editingSurveyId && urlParams.get('openTemplates') === '1') {
+    window.history.replaceState({}, '', 'create-survey.html');
+    window.setTimeout(openTemplatePicker, 0);
+  }
 });
 
 window.addEventListener('beforeunload', event => {

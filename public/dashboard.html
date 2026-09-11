@@ -58,6 +58,9 @@
           </div>
         </div>
         <div class="header-actions">
+          <button type="button" class="btn btn-secondary dashboard-command-trigger" id="btn-command-palette" aria-haspopup="dialog" aria-controls="command-palette-dialog">
+            <span aria-hidden="true">⌘</span> Search <kbd>Ctrl K</kbd>
+          </button>
           <a href="create-survey.html" class="btn btn-primary dashboard-create-btn">
             <span aria-hidden="true">＋</span> Create Survey
           </a>
@@ -105,6 +108,110 @@
           </article>
         </section>
 
+        <section class="card dashboard-response-pulse-card" aria-labelledby="response-pulse-title" aria-busy="true">
+          <div class="card-header dashboard-response-pulse-header">
+            <div>
+              <span class="page-kicker">Collection monitor</span>
+              <h2 class="card-title" id="response-pulse-title">Live Response Pulse</h2>
+              <p class="card-subtitle">A lightweight response check while this dashboard remains open.</p>
+            </div>
+            <span id="response-pulse-status" class="response-pulse-status" aria-live="polite">Loading…</span>
+          </div>
+          <div class="response-pulse-body">
+            <div class="response-pulse-metrics">
+              <div><strong id="response-pulse-today">—</strong><span>responses today</span></div>
+              <div><strong id="response-pulse-last-hour">—</strong><span>in the last hour</span></div>
+            </div>
+            <p class="response-pulse-latest">Latest response: <time id="response-pulse-latest" aria-live="polite">Loading…</time></p>
+            <p id="response-pulse-new" class="response-pulse-new" role="status" aria-live="polite"></p>
+            <p id="response-pulse-hint" class="response-pulse-hint" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section class="card dashboard-health-card" aria-labelledby="research-health-title">
+          <div class="card-header dashboard-health-header">
+            <div>
+              <span class="page-kicker">Operational indicator</span>
+              <h2 class="card-title" id="research-health-title">Research Health</h2>
+              <p class="card-subtitle">Explainable collection health for active studies. This is not an AI or predictive score.</p>
+            </div>
+            <a href="surveys.html" class="btn btn-secondary btn-sm">View studies <span aria-hidden="true">→</span></a>
+          </div>
+          <div id="research-health-list" class="research-health-list" aria-live="polite" aria-busy="true">
+            <div class="research-health-empty">Calculating research health…</div>
+          </div>
+        </section>
+
+        <section class="card dashboard-heatmap-card" aria-labelledby="response-heatmap-title">
+          <div class="card-header dashboard-heatmap-header">
+            <div>
+              <span class="page-kicker">Collection pattern</span>
+              <h2 class="card-title" id="response-heatmap-title">Response Calendar</h2>
+              <p id="response-heatmap-range" class="card-subtitle" aria-live="polite">Loading the most recent 12 weeks…</p>
+            </div>
+          </div>
+          <div class="response-heatmap-scroll">
+            <div class="response-heatmap-layout">
+              <div id="response-heatmap-weekdays" class="response-heatmap-weekdays" aria-hidden="true"></div>
+              <div id="response-heatmap-grid" class="response-heatmap-grid" role="grid" aria-label="Response calendar heatmap" aria-busy="true"></div>
+            </div>
+          </div>
+          <div class="response-heatmap-footer">
+            <div class="response-heatmap-legend" aria-label="Response intensity legend"><span>Less</span><i class="heatmap-level-0"></i><i class="heatmap-level-1"></i><i class="heatmap-level-2"></i><i class="heatmap-level-3"></i><i class="heatmap-level-4"></i><span>More</span></div>
+            <p id="response-heatmap-selected" class="response-heatmap-selected" role="status" aria-live="polite">Select a day to view its response count.</p>
+          </div>
+        </section>
+
+        <section class="card dashboard-achievements-card" aria-labelledby="milestone-achievements-title">
+          <div class="card-header dashboard-achievements-header">
+            <div>
+              <span class="page-kicker">Collection progress</span>
+              <h2 class="card-title" id="milestone-achievements-title">Milestones &amp; Achievements</h2>
+              <p class="card-subtitle">Deterministic recognition for target progress, readiness, deadlines, and response activity.</p>
+            </div>
+          </div>
+          <div id="milestone-achievements-list" class="milestone-achievements-list" aria-live="polite" aria-busy="true">
+            <div class="milestone-achievements-empty">Reviewing survey achievements…</div>
+          </div>
+        </section>
+
+        <section class="card dashboard-quick-actions-card" aria-labelledby="quick-actions-title">
+          <div class="card-header dashboard-quick-actions-header">
+            <div>
+              <span class="page-kicker">Start here</span>
+              <h2 class="card-title" id="quick-actions-title">Quick Actions</h2>
+              <p class="card-subtitle">Open the research workflow you need without leaving your dashboard.</p>
+            </div>
+          </div>
+          <div class="dashboard-quick-actions" aria-label="Research workspace shortcuts">
+            <a href="create-survey.html" class="quick-action quick-action-primary" data-workspace-action="new-survey">
+              <span class="quick-action-icon" aria-hidden="true">＋</span>
+              <span><strong>New Survey</strong><small>Build a blank research survey</small></span>
+              <span class="quick-action-arrow" aria-hidden="true">→</span>
+            </a>
+            <a href="create-survey.html?openTemplates=1" class="quick-action" data-workspace-action="templates">
+              <span class="quick-action-icon" aria-hidden="true">▣</span>
+              <span><strong>Create From Template</strong><small>Reuse a saved questionnaire</small></span>
+              <span class="quick-action-arrow" aria-hidden="true">→</span>
+            </a>
+            <a href="surveys.html?quickAction=collection" class="quick-action" data-workspace-action="new-collection">
+              <span class="quick-action-icon" aria-hidden="true">⊞</span>
+              <span><strong>New Collection</strong><small>Group related studies</small></span>
+              <span class="quick-action-arrow" aria-hidden="true">→</span>
+            </a>
+            <a href="surveys.html?quickAction=compare" class="quick-action" data-workspace-action="compare-surveys">
+              <span class="quick-action-icon" aria-hidden="true">⇄</span>
+              <span><strong>Compare Surveys</strong><small>Select two to four studies</small></span>
+              <span class="quick-action-arrow" aria-hidden="true">→</span>
+            </a>
+            <a href="surveys.html?quickAction=analytics" class="quick-action" data-workspace-action="open-analytics">
+              <span class="quick-action-icon" aria-hidden="true">⌁</span>
+              <span><strong>Open Analytics</strong><small>Choose a study to analyze</small></span>
+              <span class="quick-action-arrow" aria-hidden="true">→</span>
+            </a>
+          </div>
+        </section>
+
         <section class="card dashboard-activity-card" aria-labelledby="response-activity-title">
           <div class="card-header dashboard-activity-header">
             <div>
@@ -141,6 +248,20 @@
           </div>
           <div id="upcoming-research-list" class="upcoming-research-list" aria-live="polite" aria-busy="true">
             <div class="upcoming-empty-state">Loading upcoming studies…</div>
+          </div>
+        </section>
+
+        <section class="card dashboard-timeline-card" aria-labelledby="recent-activity-title">
+          <div class="card-header dashboard-timeline-header">
+            <div>
+              <span class="page-kicker">Workspace history</span>
+              <h2 class="card-title" id="recent-activity-title">Recent Activity</h2>
+              <p class="card-subtitle">The latest administrator actions across your research workspace.</p>
+            </div>
+            <a href="surveys.html" class="btn btn-secondary btn-sm">View workspace <span aria-hidden="true">→</span></a>
+          </div>
+          <div id="recent-activity-timeline" class="recent-activity-timeline" aria-live="polite" aria-busy="true">
+            <div class="timeline-empty-state">Loading recent workspace activity…</div>
           </div>
         </section>
 
@@ -198,7 +319,26 @@
   </div>
 
   <div id="toast-container"></div>
+  <div id="milestone-celebration" class="milestone-celebration" role="status" aria-live="polite" hidden></div>
+  <dialog id="command-palette-dialog" class="command-palette-dialog" aria-labelledby="command-palette-title">
+    <div class="command-palette-shell">
+      <div class="command-palette-heading">
+        <div><span class="page-kicker">Research workspace</span><h2 id="command-palette-title">Command Palette</h2></div>
+        <button type="button" class="command-palette-close" id="btn-command-palette-close" aria-label="Close command palette">×</button>
+      </div>
+      <label class="sr-only" for="command-palette-input">Search commands and surveys</label>
+      <div class="command-palette-search-wrap">
+        <span aria-hidden="true">⌕</span>
+        <input id="command-palette-input" type="search" autocomplete="off" placeholder="Search commands and surveys…" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="command-palette-results">
+      </div>
+      <div id="command-palette-results" class="command-palette-results" role="listbox" aria-label="Matching commands"></div>
+      <p id="command-palette-message" class="command-palette-message" aria-live="polite"></p>
+      <footer class="command-palette-footer"><span><kbd>↑</kbd> <kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Open</span><span><kbd>Esc</kbd> Close</span></footer>
+    </div>
+  </dialog>
   <script src="js/common.js"></script>
+  <script src="js/command-palette.js"></script>
+  <script src="js/milestones.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
 </html>

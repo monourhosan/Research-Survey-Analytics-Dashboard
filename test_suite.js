@@ -4,6 +4,29 @@
  */
 
 const http = require('http');
+const {
+  normalizeCommandQuery,
+  getWorkspaceActions,
+  buildSurveyCommands,
+  rankCommands,
+  nextCommandIndex
+} = require('./public/js/command-palette.js');
+const {
+  decideMilestoneAcknowledgement,
+  evaluateMilestoneAcknowledgements
+} = require('./public/js/milestones.js');
+const {
+  getResponseActivityWindow,
+  getResponsePulseWindow,
+  responseHeatmapLevel,
+  calculateResearchHealth,
+  researchHealthLabel,
+  deadlineRunwayNormalized,
+  recentActivityNormalized,
+  buildResearchHealth,
+  highestTargetMilestone,
+  buildAchievementBadges
+} = require('./server');
 
 function request(method, path, body = null, cookie = null) {
   return new Promise((resolve, reject) => {
@@ -52,6 +75,7 @@ async function runTests() {
   console.log('==============================================');
   let passed = 0;
   let failed = 0;
+  let initialResponsePulse = null;
 
   function assert(condition, name, details = '') {
     if (condition) {
@@ -88,6 +112,152 @@ async function runTests() {
     // TEST 18b: Authenticated dashboard succeeds
     const authCheck = await request('GET', '/api/dashboard', null, sessionCookie);
     assert(authCheck.status === 200 && authCheck.body.totalSurveys >= 1, 'TEST 18b: Authenticated dashboard returns valid metrics');
+
+    const unauthenticatedPulse = await request('GET', '/api/dashboard/pulse');
+    const responsePulse = await request('GET', '/api/dashboard/pulse', null, sessionCookie);
+    initialResponsePulse = responsePulse.body;
+    const responsePulseShape = responsePulse.body &&
+      Number.isSafeInteger(responsePulse.body.totalResponses) && responsePulse.body.totalResponses >= 0 &&
+      Number.isSafeInteger(responsePulse.body.todayCount) && responsePulse.body.todayCount >= 0 &&
+      Number.isSafeInteger(responsePulse.body.lastHourCount) && responsePulse.body.lastHourCount >= 0 &&
+      Number.isSafeInteger(responsePulse.body.activeSurveyCount) && responsePulse.body.activeSurveyCount >= 0 &&
+      (responsePulse.body.latestResponseAt === null || !Number.isNaN(Date.parse(responsePulse.body.latestResponseAt)));
+    assert(
+      unauthenticatedPulse.status === 401 && responsePulse.status === 200 && responsePulseShape &&
+      responsePulse.body.totalResponses === authCheck.body.totalResponses &&
+      !JSON.stringify(responsePulse.body).includes('answer_text'),
+      'TEST 18b1: Response pulse stays authenticated, aggregate-only, and matches dashboard totals'
+    );
+
+    const pulseWindow = getResponsePulseWindow(new Date('2026-09-11T00:30:00.000Z'));
+    assert(
+      pulseWindow.todayStart.toISOString() === '2026-09-11T00:00:00.000Z' &&
+      pulseWindow.tomorrowStart.toISOString() === '2026-09-12T00:00:00.000Z' &&
+      pulseWindow.lastHourStart.toISOString() === '2026-09-10T23:30:00.000Z',
+      'TEST 18b2: Response pulse uses UTC day boundaries and an exact trailing one-hour window'
+    );
+
+    const heatmapWindow = getResponseActivityWindow(84, new Date('2026-09-11T00:30:00.000Z'));
+    assert(
+      heatmapWindow.currentStart.toISOString() === '2026-06-20T00:00:00.000Z' &&
+      heatmapWindow.currentEnd.toISOString() === '2026-09-12T00:00:00.000Z' &&
+      (heatmapWindow.currentEnd.getTime() - heatmapWindow.currentStart.getTime()) / 86400000 === 84 &&
+      responseHeatmapLevel(0, 0) === 0 && responseHeatmapLevel(0, 8) === 0 &&
+      responseHeatmapLevel(1, 1) === 4 && responseHeatmapLevel(1, 4) === 1 &&
+      responseHeatmapLevel(2, 4) === 2 && responseHeatmapLevel(3, 4) === 3 && responseHeatmapLevel(4, 4) === 4,
+      'TEST 18b2a: Calendar heatmap uses an exact 84-day UTC window with stable 0–4 intensity levels'
+    );
+
+    const responseHeatmap = authCheck.body.responseHeatmap;
+    const heatmapDaysAreContinuous = Array.isArray(responseHeatmap?.days) && responseHeatmap.days.length === 84 &&
+      responseHeatmap.days.every((day, index, days) => {
+        const previous = index ? Date.parse(`${days[index - 1].date}T00:00:00.000Z`) : null;
+        return /^\d{4}-\d{2}-\d{2}$/.test(day.date) && Number.isSafeInteger(day.count) && day.count >= 0 &&
+          Number.isSafeInteger(day.level) && day.level >= 0 && day.level <= 4 &&
+          (previous === null || Date.parse(`${day.date}T00:00:00.000Z`) - previous === 86400000);
+      });
+    const latestActivityMatchesHeatmap = heatmapDaysAreContinuous && authCheck.body.responseActivity.points.length === 7 &&
+      authCheck.body.responseActivity.points.every((point, index) => point.date === responseHeatmap.days[index + 77].date && point.count === responseHeatmap.days[index + 77].count);
+    assert(
+      heatmapDaysAreContinuous && responseHeatmap.startDate === responseHeatmap.days[0].date &&
+      responseHeatmap.endDate === responseHeatmap.days[83].date &&
+      responseHeatmap.totalResponses === responseHeatmap.days.reduce((sum, day) => sum + day.count, 0) &&
+      responseHeatmap.maxDailyCount === Math.max(...responseHeatmap.days.map(day => day.count)) &&
+      latestActivityMatchesHeatmap && !JSON.stringify(responseHeatmap).includes('answer_text'),
+      'TEST 18b2b: Calendar heatmap is zero-filled, aggregate-only, and consistent with UTC response activity'
+    );
+
+    const paletteActions = getWorkspaceActions();
+    const paletteSurveys = buildSurveyCommands([
+      { id: 7, title: 'AI in Education', status: 'active', is_archived: 0 },
+      { id: 8, title: 'Archived Study', status: 'closed', is_archived: 1 },
+      { id: 0, title: 'Invalid study', status: 'draft', is_archived: 0 }
+    ]);
+    const paletteCommands = paletteActions.concat(paletteSurveys);
+    assert(
+      normalizeCommandQuery('  Témp  ') === 'temp' &&
+      rankCommands(paletteCommands, 'ana')[0].id === 'open-analytics' &&
+      rankCommands(paletteCommands, 'ai in education')[0].label === 'Manage: AI in Education' &&
+      rankCommands(paletteCommands, 'education')[0].label === 'Manage: AI in Education' &&
+      rankCommands(paletteCommands, '').length === 10 && rankCommands(paletteCommands, '', 3).length === 3 &&
+      paletteSurveys.length === 2 && !paletteSurveys.some(command => command.label.includes('Archived') || command.label.includes('Invalid')) &&
+      nextCommandIndex(-1, 3, 1) === 0 && nextCommandIndex(0, 3, -1) === 0 && nextCommandIndex(2, 3, 1) === 2 && nextCommandIndex(-1, 3, -1) === 2 && nextCommandIndex(0, 0, 1) === -1,
+      'TEST 18b2c: Command palette normalizes aliases, ranks exact/prefix/substring matches, caps results, and excludes invalid surveys'
+    );
+
+    const milestoneNow = Date.parse('2026-09-11T12:00:00.000Z');
+    const badgeSurvey = { id: 31, title: 'Badge study', description: 'A complete study.', status: 'active', is_archived: 0, response_count: 10, target_responses: 10, response_limit: null, response_deadline: '2026-09-14T12:00:00.000Z' };
+    const readyQuestion = [{ id: 1, question_text: 'Is this badge rule clear?', question_type: 'yes_no', options_json: '[]', is_required: 1 }];
+    const highBadges = buildAchievementBadges(badgeSurvey, readyQuestion, { currentCount: 10, previousCount: 5 }, milestoneNow);
+    const outsideDeadline = buildAchievementBadges({ ...badgeSurvey, response_count: 0, target_responses: null, response_deadline: '2026-09-14T12:00:00.001Z' }, readyQuestion, { currentCount: 9, previousCount: 0 }, milestoneNow);
+    const expiredDeadline = buildAchievementBadges({ ...badgeSurvey, response_count: 0, target_responses: null, response_deadline: '2026-09-11T11:59:59.999Z' }, readyQuestion, { currentCount: 5, previousCount: 0 }, milestoneNow);
+    const firstObservation = decideMilestoneAcknowledgement(null, 75, 100);
+    const jumpToSeventyFive = decideMilestoneAcknowledgement({ milestone: 25, target: 100 }, 75, 100);
+    const finalTarget = decideMilestoneAcknowledgement({ milestone: 75, target: 100 }, 100, 100);
+    const unchangedMilestone = decideMilestoneAcknowledgement({ milestone: 75, target: 100 }, 75, 100);
+    const changedTarget = decideMilestoneAcknowledgement({ milestone: 75, target: 100 }, 50, 160);
+    const throwingStorage = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+    assert(
+      [24, 25, 49, 50, 74, 75, 99, 100, 120].map(value => highestTargetMilestone(value, 100)).join(',') === ',25,25,50,50,75,75,100,100' &&
+      highestTargetMilestone(1, null) === null &&
+      highBadges.map(badge => badge.id).join(',') === 'target_reached,closing_soon,fast_growth,high_activity,fully_ready' &&
+      !outsideDeadline.some(badge => badge.id === 'closing_soon') && !expiredDeadline.some(badge => badge.id === 'closing_soon') &&
+      !expiredDeadline.some(badge => badge.id === 'fast_growth') &&
+      firstObservation.baseline && firstObservation.celebration === null && jumpToSeventyFive.celebration === 75 &&
+      finalTarget.celebration === 100 && unchangedMilestone.celebration === null && changedTarget.baseline && changedTarget.celebration === null &&
+      Array.isArray(evaluateMilestoneAcknowledgements([{ surveyId: 1, title: 'Safe storage', targetResponses: 100, highestTargetMilestone: 75 }], throwingStorage)),
+      'TEST 18b2d: Milestones honor exact boundaries and badges use stable deterministic readiness, deadline, activity, and growth rules'
+    );
+
+    const dashboardAchievements = authCheck.body.surveyAchievements;
+    assert(
+      Array.isArray(dashboardAchievements) && dashboardAchievements.every(item =>
+        Number.isSafeInteger(item.surveyId) && Array.isArray(item.badges) &&
+        (item.highestTargetMilestone === null || [25, 50, 75, 100].includes(item.highestTargetMilestone)) &&
+        item.badges.every((badge, index, badges) => typeof badge.id === 'string' && typeof badge.label === 'string' &&
+          Number.isSafeInteger(badge.priority) && (!index || badges[index - 1].priority >= badge.priority)) &&
+        !JSON.stringify(item).includes('answer_text')) &&
+      Array.isArray(responsePulse.body.milestoneSurveys) && !JSON.stringify(responsePulse.body.milestoneSurveys).includes('answer_text'),
+      'TEST 18b2e: Dashboard and live pulse expose only ordered, aggregate milestone achievements'
+    );
+
+    const normalizedHealth = calculateResearchHealth({
+      readiness: { normalized: 1, weight: 25 },
+      collection: { normalized: null, weight: 35 },
+      deadline: { normalized: null, weight: 20 },
+      recentActivity: { normalized: 0.7, weight: 20 }
+    });
+    const emptyHealth = calculateResearchHealth({ readiness: { normalized: null, weight: 25 } });
+    assert(
+      normalizedHealth.score === 87 && normalizedHealth.availableWeight === 45 && !normalizedHealth.limitedData &&
+      emptyHealth.score === 0 && emptyHealth.availableWeight === 0 && emptyHealth.limitedData &&
+      researchHealthLabel(49) === 'At Risk' && researchHealthLabel(50) === 'Needs Attention' &&
+      researchHealthLabel(69) === 'Needs Attention' && researchHealthLabel(70) === 'Healthy' &&
+      researchHealthLabel(84) === 'Healthy' && researchHealthLabel(85) === 'Excellent',
+      'TEST 18b3: Health scoring normalizes missing optional components and honors label boundaries'
+    );
+
+    const healthNow = Date.parse('2026-09-11T12:00:00.000Z');
+    const healthItems = buildResearchHealth([
+      { id: 1, title: 'Target reached', status: 'active', is_archived: 0, response_count: 12, target_responses: 10, response_deadline: '2026-09-12T12:00:00.000Z', description: '', response_limit: null },
+      { id: 2, title: 'Archived study', status: 'active', is_archived: 1, response_count: 0, target_responses: null, response_deadline: null, description: '', response_limit: null }
+    ], new Map([[1, []], [2, []]]), new Map([[1, { currentCount: 3, previousCount: 2, totalCount: 12 }]]), healthNow);
+    assert(
+      healthItems.length === 1 && healthItems[0].components.collection.score === 100 &&
+      healthItems[0].components.deadline.score === 100 && healthItems[0].components.recentActivity.score === 100 &&
+      deadlineRunwayNormalized('2026-09-10T12:00:00.000Z', 20, 5, healthNow) === 0 &&
+      recentActivityNormalized(0, 0, 0) === 0 && recentActivityNormalized(3, 2, 10) === 1,
+      'TEST 18b4: Health components cap targets, score deadlines/activity, and exclude archived surveys'
+    );
+
+    const dashboardHealthShape = authCheck.body.researchHealth;
+    assert(
+      Array.isArray(dashboardHealthShape) && dashboardHealthShape.every(item =>
+        Number.isSafeInteger(item.score) && item.score >= 0 && item.score <= 100 &&
+        item.availableWeight >= 0 && item.components && typeof item.summary === 'string' &&
+        !Object.prototype.hasOwnProperty.call(item, 'answer_text')),
+      'TEST 18b5: Dashboard research health is bounded, explainable, and excludes answer content'
+    );
 
     // TEST 18c: Global response activity uses bounded, UTC calendar-day ranges.
     const activityResponses = await Promise.all([7, 30, 90].map(range => request('GET', `/api/dashboard?range=${range}`, null, sessionCookie)));
@@ -174,6 +344,15 @@ async function runTests() {
       }
     });
     assert(goodSubmit.status === 201 && goodSubmit.body.success, 'TEST 9: Response can be submitted');
+
+    const pulseAfterAcceptedResponse = await request('GET', '/api/dashboard/pulse', null, sessionCookie);
+    assert(
+      pulseAfterAcceptedResponse.status === 200 &&
+      pulseAfterAcceptedResponse.body.totalResponses >= initialResponsePulse.totalResponses + 1 &&
+      pulseAfterAcceptedResponse.body.todayCount >= 1 && pulseAfterAcceptedResponse.body.lastHourCount >= 1 &&
+      !Number.isNaN(Date.parse(pulseAfterAcceptedResponse.body.latestResponseAt)),
+      'TEST 9a: Accepted responses immediately update total, today, hour, and latest response pulse data'
+    );
 
     // Submit a second response to test distributions
     await request('POST', `/api/public/surveys/${createdId}/responses`, {
@@ -531,6 +710,22 @@ async function runTests() {
     const activity = await request('GET', '/api/activity?limit=100', null, sessionCookie);
     assert(activeArchiveBlocked.status === 400 && archive.status === 200 && archivedList.body.some(survey => survey.id === workspaceSurveyId) && restore.status === 200 && activity.body.some(item => item.action === 'SURVEY_ARCHIVED'), 'TEST 21k: Archive/restore preserves studies and records activity');
 
+    const unauthenticatedActivity = await request('GET', '/api/activity?limit=6');
+    const dashboardActivity = await request('GET', '/api/activity?limit=6', null, sessionCookie);
+    const activityIsNewestFirst = dashboardActivity.body.every((item, index) => index === 0 ||
+      Date.parse(dashboardActivity.body[index - 1].created_at) > Date.parse(item.created_at) ||
+      (Date.parse(dashboardActivity.body[index - 1].created_at) === Date.parse(item.created_at) && dashboardActivity.body[index - 1].id >= item.id));
+    const activityHasSafeTimelineShape = dashboardActivity.body.every(item =>
+      Number.isSafeInteger(item.id) && typeof item.action === 'string' &&
+      Object.hasOwn(item, 'surveyId') && Object.hasOwn(item, 'surveyTitle') && Object.hasOwn(item, 'createdAt'));
+    assert(
+      unauthenticatedActivity.status === 401 && dashboardActivity.status === 200 && dashboardActivity.body.length <= 6 &&
+      activityIsNewestFirst && activityHasSafeTimelineShape &&
+      !JSON.stringify(dashboardActivity.body).includes('Private pilot-testing note.') &&
+      dashboardActivity.body.some(item => ['SURVEY_ARCHIVED', 'SURVEY_RESTORED', 'NOTE_CREATED'].includes(item.action)),
+      'TEST 24: Recent activity API stays authenticated, bounded, newest-first, and excludes private note content'
+    );
+
     const collectionDelete = await request('DELETE', `/api/collections/${workspaceCollection.body.id}`, null, sessionCookie);
     const unassignedDetails = await request('GET', `/api/surveys/${workspaceSurveyId}`, null, sessionCookie);
     assert(collectionDelete.status === 200 && unassignedDetails.body.collection_id === null, 'TEST 21l: Collection deletion safely unassigns surveys');
@@ -663,11 +858,55 @@ async function runTests() {
     const dashboardScript = await request('GET', '/js/dashboard.js');
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
+      dashboardPage.raw.includes('command-palette-dialog') && dashboardPage.raw.includes('command-palette-input') &&
+      dashboardPage.raw.includes('Milestones &amp; Achievements') && dashboardPage.raw.includes('milestone-achievements-list') &&
+      dashboardPage.raw.includes('Response Calendar') && dashboardPage.raw.includes('response-heatmap-grid') &&
       dashboardPage.raw.includes('Response Activity') && dashboardPage.raw.includes('response-activity-chart') &&
       dashboardPage.raw.includes('Upcoming Research') && dashboardPage.raw.includes('upcoming-research-list') &&
+      dashboardPage.raw.includes('Recent Activity') && dashboardPage.raw.includes('recent-activity-timeline') &&
+      dashboardPage.raw.includes('Quick Actions') && dashboardPage.raw.includes('create-survey.html?openTemplates=1') &&
+      dashboardPage.raw.includes('surveys.html?quickAction=collection') && dashboardPage.raw.includes('surveys.html?quickAction=compare') &&
+      dashboardPage.raw.includes('surveys.html?quickAction=analytics') && dashboardPage.raw.includes('Live Response Pulse') &&
+      dashboardPage.raw.includes('response-pulse-today') && dashboardPage.raw.includes('response-pulse-last-hour') &&
+      dashboardPage.raw.includes('Research Health') && dashboardPage.raw.includes('research-health-list') &&
       dashboardScript.status === 200 && dashboardScript.raw.includes('renderAttentionItems') &&
-      dashboardScript.raw.includes('drawResponseActivityChart') && dashboardScript.raw.includes('renderUpcomingResearch') && dashboardScript.raw.includes('AbortController'),
-      'TEST 20b1: Dashboard attention, response activity, and upcoming-research panel assets load'
+      dashboardScript.raw.includes('initializeCommandPalette') && dashboardScript.raw.includes('loadPaletteSurveys') &&
+      dashboardScript.raw.includes("event.key.toLocaleLowerCase() === 'k'") && dashboardScript.raw.includes('trapCommandPaletteFocus') &&
+      dashboardScript.raw.includes('restoreCommandPaletteFocus') && dashboardScript.raw.includes('syncDashboardQuickActions') &&
+      dashboardScript.raw.includes('renderSurveyAchievements') && dashboardScript.raw.includes('evaluateMilestoneAchievements') &&
+      dashboardScript.raw.includes('milestoneSurveys') && dashboardScript.raw.includes('achievementBadgeMarkup') &&
+      dashboardScript.raw.includes('renderResponseHeatmap') && dashboardScript.raw.includes('response-heatmap-cell') &&
+      dashboardScript.raw.includes("event.key === 'Enter'") && dashboardScript.raw.includes("event.key === ' '") &&
+      dashboardScript.raw.includes('drawResponseActivityChart') && dashboardScript.raw.includes('renderUpcomingResearch') &&
+      dashboardScript.raw.includes('renderActivityTimeline') && dashboardScript.raw.includes('No recent workspace activity yet.') &&
+      dashboardScript.raw.includes('activityTimeDetails') && dashboardScript.raw.includes('AbortController'),
+      'TEST 20b1: Dashboard command palette, calendar, attention, response activity, upcoming-research, timeline, quick-action, and pulse assets load'
+    );
+
+    const surveyWorkspaceScript = await request('GET', '/js/surveys.js');
+    const surveyBuilderScript = await request('GET', '/js/create-survey.js');
+    assert(
+      surveyWorkspaceScript.status === 200 && surveyWorkspaceScript.raw.includes('launchWorkspaceQuickAction') &&
+      surveyWorkspaceScript.raw.includes("action === 'collection'") && surveyWorkspaceScript.raw.includes('Select two to four surveys') &&
+      surveyWorkspaceScript.raw.includes('Choose Analytics beside any survey') &&
+      surveyBuilderScript.status === 200 && surveyBuilderScript.raw.includes("urlParams.get('openTemplates') === '1'") &&
+      surveyBuilderScript.raw.includes('openTemplatePicker'),
+      'TEST 20b2: Quick actions route to existing workspace and template workflows'
+    );
+
+    assert(
+      dashboardScript.raw.includes('RESPONSE_PULSE_INTERVAL_MS = 45 * 1000') &&
+      dashboardScript.raw.includes("fetch('/api/dashboard/pulse'") && dashboardScript.raw.includes('handleResponsePulseVisibility') &&
+      dashboardScript.raw.includes('responsePulseDelta') && dashboardScript.raw.includes('responsePulseBaseline') &&
+      dashboardScript.raw.includes('document.hidden') && dashboardScript.raw.includes('responsePulseRequestController') &&
+      dashboardScript.raw.includes('renderResponsePulseError'),
+      'TEST 20b3: Response pulse uses bounded polling, visibility handling, baseline detection, and safe errors'
+    );
+
+    assert(
+      dashboardScript.raw.includes('renderResearchHealth') && dashboardScript.raw.includes('research-health-components') &&
+      dashboardScript.raw.includes('Limited data') && dashboardScript.raw.includes('renderResearchHealthError'),
+      'TEST 20b4: Research health renders accessible component breakdowns and empty/error states'
     );
 
     const builderPage = await request('GET', '/create-survey.html');

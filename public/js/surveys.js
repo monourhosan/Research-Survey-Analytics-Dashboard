@@ -43,7 +43,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-compare-surveys').addEventListener('click', openComparison);
 
   await Promise.all([loadWorkspace(), loadCollections(), loadSavedViews(), loadAllSurveys()]);
+  launchWorkspaceQuickAction();
 });
+
+function launchWorkspaceQuickAction() {
+  const params = new URLSearchParams(window.location.search);
+  const action = params.get('quickAction');
+  if (!action) return;
+
+  window.history.replaceState({}, '', 'surveys.html');
+  if (action === 'collection') {
+    openCollectionDialog();
+    return;
+  }
+
+  const inventory = document.querySelector('.survey-inventory-card');
+  const guidance = document.getElementById('workspace-quick-action-guidance');
+  const messages = {
+    compare: 'Select two to four surveys using the comparison checkboxes, then choose Compare selected.',
+    analytics: 'Choose Analytics beside any survey to open its survey-specific results.'
+  };
+  if (!inventory || !guidance || !messages[action]) return;
+
+  guidance.hidden = false;
+  guidance.textContent = messages[action];
+  inventory.tabIndex = -1;
+  inventory.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.setTimeout(() => inventory.focus({ preventScroll: true }), 250);
+}
 
 async function apiJson(url, options = {}) {
   const response = await fetch(url, options);

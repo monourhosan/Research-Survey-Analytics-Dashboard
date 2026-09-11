@@ -99,6 +99,30 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
    - Add private research notes that never appear in public survey routes or CSV exports.
    - Save validated workspace filters and analytics date ranges, and compare 2–4 real surveys using response, target, rating, deadline, and recent-collection metrics.
    - Review a deterministic Draft readiness checklist before publishing; this supplements rather than replaces server-side validation.
+15. **Research Health Score**:
+   - Shows an explainable operational health indicator for active, non-archived surveys. It is deterministic application logic, not AI, prediction, or a statistically validated research measure.
+   - Uses readiness/configuration quality (25%), collection progress when a target exists (35%), deadline runway when a deadline exists (20%), and recent accepted-response activity (20%). Missing optional targets or deadlines are excluded and the available weights are normalized back to a 0–100 score.
+16. **Phase 2 Dashboard Operations**:
+   - **Research Health Score** is a deterministic operational indicator, not AI or a predictive model.
+   - **Live Response Pulse** polls the authenticated dashboard periodically over HTTP while the page is visible; it does not use a persistent socket.
+   - **Response Calendar Heatmap** shows a server-derived, UTC-aligned 84-day response pattern with zero-filled dates.
+   - **Command Palette** opens with Ctrl/Cmd+K to navigate existing research workflows and search current surveys from a one-time cached inventory request.
+   - **Milestones & Achievement Badges** use deterministic target, readiness, deadline, and seven-day activity rules. A versioned browser-local storage entry acknowledges target celebrations without storing responses, answers, notes, or respondent data.
+
+### Research Health Score Rules
+
+For each active, non-archived survey, every available component is clamped to 0–1 and calculated as:
+
+```text
+score = round(sum(componentScore × componentWeight) / sum(availableWeights) × 100)
+```
+
+- **Readiness (25%)** reuses the existing readiness-check percentage.
+- **Collection progress (35%)** is `accepted responses / target`, capped at 1.0, and is unavailable when no target is configured.
+- **Deadline runway (20%)** is unavailable when no deadline is configured. The documented fallback is 1.00 above 14 days, 0.85 for 8–14 days, 0.65 for 4–7 days, 0.40 for 2–3 days, 0.20 for one day, 0.10 on deadline day, and 0.00 after a deadline; a reached target scores 1.00.
+- **Recent activity (20%)** compares accepted responses in the latest seven days with the preceding seven days. Stable or improving activity is 1.00; lower but at least half is 0.70; lower positive activity is 0.40; no current activity with older responses is 0.15; and no responses ever is 0.00.
+
+Labels are **Excellent** (85–100), **Healthy** (70–84), **Needs Attention** (50–69), and **At Risk** (0–49). When fewer than two components are available, the interface marks the result as limited data.
 
 ---
 

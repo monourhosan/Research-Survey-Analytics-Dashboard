@@ -223,6 +223,15 @@ const ATTENTION_CAPACITY_WARNING_PERCENT = 90;
 const ATTENTION_ITEM_LIMIT = 5;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const RESPONSE_ACTIVITY_RANGES = new Set([7, 30, 90]);
+const RESPONSE_HEATMAP_DAYS = 84;
+const TARGET_MILESTONES = Object.freeze([25, 50, 75, 100]);
+const ACHIEVEMENT_BADGE_DEFINITIONS = Object.freeze([
+  { id: 'target_reached', label: 'Target Reached', description: 'The configured response target has been reached.', priority: 100 },
+  { id: 'closing_soon', label: 'Closing Soon', description: 'The active response deadline is within three days.', priority: 90 },
+  { id: 'fast_growth', label: 'Fast Growth', description: 'Responses grew strongly compared with the previous seven days.', priority: 80 },
+  { id: 'high_activity', label: 'High Activity', description: 'At least 10 accepted responses arrived in the last seven days.', priority: 70 },
+  { id: 'fully_ready', label: 'Fully Ready', description: 'All applicable readiness checks currently pass.', priority: 60 }
+]);
 
 function calculateDaysRemaining(deadline, nowMs) {
   const deadlineMs = Date.parse(deadline || '');
@@ -281,6 +290,278 @@ async function buildResponseActivity(rangeDays, now = new Date()) {
     growthPercent: previousTotal > 0 ? Number((((currentTotal - previousTotal) / previousTotal) * 100).toFixed(1)) : null,
     points
   };
+}
+
+function responseHeatmapLevel(count, maxDailyCount) {
+  const safeCount = Number.isFinite(count) && count > 0 ? count : 0;
+  const safeMax = Number.isFinite(maxDailyCount) && maxDailyCount > 0 ? maxDailyCount : 0;
+  if (!safeCount || !safeMax) return 0;
+  if (safeMax === 1) return 4;
+  const ratio = safeCount / safeMax;
+  if (ratio <= 0.25) return 1;
+  if (ratio <= 0.5) return 2;
+  if (ratio <= 0.75) return 3;
+  return 4;
+}
+
+async function buildResponseHeatmap(now = new Date()) {
+  const { currentStart, currentEnd } = getResponseActivityWindow(RESPONSE_HEATMAP_DAYS, now);
+  const rows = await dbAll(`
+    SELECT substr(submitted_at, 1, 10) AS date, COUNT(*) AS count
+    FROM responses
+    WHERE submitted_at >= ? AND submitted_at < ?
+    GROUP BY substr(submitted_at, 1, 10)
+  `, [toSqlUtcTimestamp(currentStart), toSqlUtcTimestamp(currentEnd)]);
+  const countsByDate = new Map(rows.map(row => [row.date, Number(row.count || 0)]));
+  const rawDays = Array.from({ length: RESPONSE_HEATMAP_DAYS }, (_, offset) => {
+    const date = toUtcDateKey(addUtcDays(currentStart, offset));
+    return { date, count: countsByDate.get(date) || 0 };
+  });
+  const maxDailyCount = Math.max(0, ...rawDays.map(day => day.count));
+  const days = rawDays.map(day => ({ ...day, level: responseHeatmapLevel(day.count, maxDailyCount) }));
+  return {
+    startDate: days[0].date,
+    endDate: days[days.length - 1].date,
+    totalResponses: days.reduce((total, day) => total + day.count, 0),
+    maxDailyCount,
+    days
+  };
+}
+
+function getResponsePulseWindow(now = new Date()) {
+  const current = new Date(now);
+  const todayStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
+  return {
+    todayStart,
+    tomorrowStart: addUtcDays(todayStart, 1),
+    lastHourStart: new Date(current.getTime() - (60 * 60 * 1000))
+  };
+}
+
+function toSqlUtcTimestamp(date) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function sqliteTimestampToIso(value) {
+  if (!value || typeof value !== 'string') return null;
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const timestamp = new Date(normalized.endsWith('Z') ? normalized : `${normalized}Z`);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
+}
+
+async function buildResponsePulse(now = new Date()) {
+  const { todayStart, tomorrowStart, lastHourStart } = getResponsePulseWindow(now);
+  const summary = await dbGet(`
+    SELECT
+      COUNT(*) AS total_responses,
+      COALESCE(SUM(CASE WHEN submitted_at >= ? AND submitted_at < ? THEN 1 ELSE 0 END), 0) AS today_count,
+      COALESCE(SUM(CASE WHEN submitted_at >= ? THEN 1 ELSE 0 END), 0) AS last_hour_count,
+      MAX(submitted_at) AS latest_response_at
+    FROM responses
+  `, [
+    toSqlUtcTimestamp(todayStart),
+    toSqlUtcTimestamp(tomorrowStart),
+    toSqlUtcTimestamp(lastHourStart)
+  ]);
+  const activeSurveyRow = await dbGet("SELECT COUNT(*) AS count FROM surveys WHERE status = 'active'");
+  return {
+    totalResponses: Number(summary?.total_responses || 0),
+    todayCount: Number(summary?.today_count || 0),
+    lastHourCount: Number(summary?.last_hour_count || 0),
+    latestResponseAt: sqliteTimestampToIso(summary?.latest_response_at),
+    activeSurveyCount: Number(activeSurveyRow?.count || 0)
+  };
+}
+
+const RESEARCH_HEALTH_WEIGHTS = Object.freeze({ readiness: 25, collection: 35, deadline: 20, recentActivity: 20 });
+
+function clampUnit(value) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function researchHealthLabel(score) {
+  if (score >= 85) return 'Excellent';
+  if (score >= 70) return 'Healthy';
+  if (score >= 50) return 'Needs Attention';
+  return 'At Risk';
+}
+
+function calculateResearchHealth(components) {
+  const available = Object.values(components).filter(component => component && component.normalized !== null && component.normalized !== undefined);
+  const availableWeight = available.reduce((total, component) => total + component.weight, 0);
+  const weightedScore = available.reduce((total, component) => total + (clampUnit(component.normalized) * component.weight), 0);
+  const score = availableWeight ? Math.round((weightedScore / availableWeight) * 100) : 0;
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    availableWeight,
+    limitedData: available.length <= 1
+  };
+}
+
+function healthComponent(normalized, weight) {
+  return normalized === null || normalized === undefined
+    ? { score: null, weight, available: false, normalized: null }
+    : { score: Math.round(clampUnit(normalized) * 100), weight, available: true, normalized: clampUnit(normalized) };
+}
+
+function deadlineRunwayNormalized(deadline, targetResponses, responseCount, nowMs = Date.now()) {
+  if (!deadline || !Number.isFinite(Date.parse(deadline))) return null;
+  if (Number.isSafeInteger(targetResponses) && targetResponses > 0 && responseCount >= targetResponses) return 1;
+  const daysRemaining = calculateDaysRemaining(deadline, nowMs);
+  if (Date.parse(deadline) <= nowMs) return 0;
+  if (daysRemaining > 14) return 1;
+  if (daysRemaining >= 8) return 0.85;
+  if (daysRemaining >= 4) return 0.65;
+  if (daysRemaining >= 2) return 0.4;
+  if (daysRemaining === 1) return 0.2;
+  return 0.1;
+}
+
+function recentActivityNormalized(currentCount, previousCount, totalCount) {
+  if (currentCount > 0 && previousCount === 0) return 1;
+  if (currentCount > 0 && currentCount >= previousCount) return 1;
+  if (currentCount > 0 && currentCount >= previousCount * 0.5) return 0.7;
+  if (currentCount > 0) return 0.4;
+  if (totalCount > 0) return 0.15;
+  return 0;
+}
+
+function highestTargetMilestone(responseCount, targetResponses) {
+  const responses = Number(responseCount);
+  const target = Number(targetResponses);
+  if (!Number.isFinite(responses) || responses < 0 || !Number.isSafeInteger(target) || target < 1) return null;
+  const progress = (responses / target) * 100;
+  return TARGET_MILESTONES.reduce((highest, milestone) => progress >= milestone ? milestone : highest, null);
+}
+
+function buildAchievementBadges(survey, questions, recentCounts = {}, nowMs = Date.now()) {
+  const responseCount = Number(survey.response_count || 0);
+  const targetResponses = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+  const deadlineMs = Date.parse(survey.response_deadline || '');
+  const currentCount = Number(recentCounts.currentCount || 0);
+  const previousCount = Number(recentCounts.previousCount || 0);
+  const readiness = computeReadiness(survey, questions || []);
+  const conditions = {
+    target_reached: Boolean(targetResponses && responseCount >= targetResponses),
+    closing_soon: survey.status === 'active' && Number.isFinite(deadlineMs) && deadlineMs > nowMs && deadlineMs - nowMs <= ATTENTION_APPROACHING_DEADLINE_DAYS * DAY_IN_MS,
+    fast_growth: currentCount >= 5 && previousCount > 0 && currentCount >= previousCount * 1.5,
+    high_activity: currentCount >= 10,
+    fully_ready: readiness.ready
+  };
+  return ACHIEVEMENT_BADGE_DEFINITIONS
+    .filter(definition => conditions[definition.id])
+    .map(definition => ({ ...definition }));
+}
+
+function buildSurveyAchievements(surveys, questionsBySurvey, responseCountsBySurvey, nowMs = Date.now()) {
+  return surveys
+    .filter(survey => !survey.is_archived)
+    .map(survey => {
+      const responseCount = Number(survey.response_count || 0);
+      const targetResponses = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+      const recent = responseCountsBySurvey.get(Number(survey.id)) || { currentCount: 0, previousCount: 0, totalCount: responseCount };
+      return {
+        surveyId: survey.id,
+        title: survey.title,
+        status: survey.status,
+        responseCount,
+        targetResponses,
+        highestTargetMilestone: highestTargetMilestone(responseCount, targetResponses),
+        badges: buildAchievementBadges(survey, questionsBySurvey.get(survey.id) || [], recent, nowMs)
+      };
+    })
+    .sort((a, b) => {
+      const priorityDifference = (b.badges[0]?.priority || 0) - (a.badges[0]?.priority || 0);
+      return priorityDifference || a.title.localeCompare(b.title) || a.surveyId - b.surveyId;
+    });
+}
+
+async function buildMilestoneSurveySnapshot(now = new Date()) {
+  const surveys = await dbAll(`
+    SELECT s.id, s.title, s.description, s.status, s.is_archived, s.response_deadline, s.response_limit, s.target_responses,
+      COUNT(r.id) AS response_count
+    FROM surveys s
+    LEFT JOIN responses r ON s.id = r.survey_id
+    WHERE s.is_archived = 0 AND s.target_responses IS NOT NULL
+    GROUP BY s.id
+  `);
+  const surveyIds = surveys.map(survey => survey.id);
+  const questions = surveyIds.length
+    ? await dbAll(`SELECT id, survey_id, question_text, question_type, options_json, is_required, sort_order
+      FROM questions WHERE survey_id IN (${surveyIds.map(() => '?').join(', ')}) ORDER BY survey_id, sort_order, id`, surveyIds)
+    : [];
+  const questionsBySurvey = new Map();
+  questions.forEach(question => {
+    const items = questionsBySurvey.get(question.survey_id) || [];
+    items.push(question);
+    questionsBySurvey.set(question.survey_id, items);
+  });
+  const responseCounts = await getResearchHealthResponseCounts(surveyIds, now);
+  return buildSurveyAchievements(surveys, questionsBySurvey, responseCounts, now.getTime());
+}
+
+function researchHealthSummary(survey, nowMs = Date.now()) {
+  const responses = Number(survey.response_count || 0);
+  const target = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+  const deadline = survey.response_deadline && Number.isFinite(Date.parse(survey.response_deadline)) ? survey.response_deadline : null;
+  const responseText = target ? `${responses} of ${target} target responses` : `${responses} accepted response${responses === 1 ? '' : 's'}`;
+  if (!deadline) return target ? `${responseText}; no deadline configured.` : `${responseText}; no target or deadline configured.`;
+  if (Date.parse(deadline) <= nowMs) return `${responseText}; deadline has passed.`;
+  const daysRemaining = calculateDaysRemaining(deadline, nowMs);
+  return `${responseText} with ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} remaining.`;
+}
+
+async function getResearchHealthResponseCounts(surveyIds, now = new Date()) {
+  if (!surveyIds.length) return new Map();
+  const { currentStart, currentEnd, previousStart } = getResponseActivityWindow(7, now);
+  const rows = await dbAll(`
+    SELECT survey_id,
+      COALESCE(SUM(CASE WHEN submitted_at >= ? AND submitted_at < ? THEN 1 ELSE 0 END), 0) AS current_count,
+      COALESCE(SUM(CASE WHEN submitted_at >= ? AND submitted_at < ? THEN 1 ELSE 0 END), 0) AS previous_count,
+      COUNT(*) AS total_count
+    FROM responses
+    WHERE survey_id IN (${surveyIds.map(() => '?').join(', ')})
+    GROUP BY survey_id
+  `, [
+    toSqlUtcTimestamp(currentStart), toSqlUtcTimestamp(currentEnd),
+    toSqlUtcTimestamp(previousStart), toSqlUtcTimestamp(currentStart),
+    ...surveyIds
+  ]);
+  return new Map(rows.map(row => [Number(row.survey_id), {
+    currentCount: Number(row.current_count || 0),
+    previousCount: Number(row.previous_count || 0),
+    totalCount: Number(row.total_count || 0)
+  }]));
+}
+
+function buildResearchHealth(surveys, questionsBySurvey, responseCountsBySurvey, nowMs = Date.now()) {
+  return surveys
+    .filter(survey => survey.status === 'active' && !survey.is_archived)
+    .map(survey => {
+      const responseCount = Number(survey.response_count || 0);
+      const targetResponses = Number.isSafeInteger(survey.target_responses) ? survey.target_responses : null;
+      const readiness = computeReadiness(survey, questionsBySurvey.get(survey.id) || []);
+      const recent = responseCountsBySurvey.get(Number(survey.id)) || { currentCount: 0, previousCount: 0, totalCount: 0 };
+      const components = {
+        readiness: healthComponent(readiness.percentage / 100, RESEARCH_HEALTH_WEIGHTS.readiness),
+        collection: healthComponent(targetResponses ? responseCount / targetResponses : null, RESEARCH_HEALTH_WEIGHTS.collection),
+        deadline: healthComponent(deadlineRunwayNormalized(survey.response_deadline, targetResponses, responseCount, nowMs), RESEARCH_HEALTH_WEIGHTS.deadline),
+        recentActivity: healthComponent(recentActivityNormalized(recent.currentCount, recent.previousCount, recent.totalCount), RESEARCH_HEALTH_WEIGHTS.recentActivity)
+      };
+      const calculated = calculateResearchHealth(components);
+      Object.values(components).forEach(component => { delete component.normalized; });
+      return {
+        surveyId: survey.id,
+        title: survey.title,
+        score: calculated.score,
+        label: researchHealthLabel(calculated.score),
+        availableWeight: calculated.availableWeight,
+        limitedData: calculated.limitedData,
+        components,
+        summary: researchHealthSummary(survey, nowMs)
+      };
+    })
+    .sort((a, b) => a.score - b.score || a.title.localeCompare(b.title) || a.surveyId - b.surveyId);
 }
 
 function buildAttentionItems(surveys, questionsBySurvey, nowMs = Date.now()) {
@@ -547,7 +828,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     `);
 
     const attentionSurveys = await dbAll(`
-      SELECT s.id, s.title, s.status, s.is_archived, s.response_deadline, s.response_limit, s.target_responses,
+      SELECT s.id, s.title, s.description, s.status, s.is_archived, s.response_deadline, s.response_limit, s.target_responses,
         COUNT(r.id) AS response_count
       FROM surveys s
       LEFT JOIN responses r ON s.id = r.survey_id
@@ -565,24 +846,53 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       questions.push(question);
       questionsBySurvey.set(question.survey_id, questions);
     });
-    const allAttentionItems = buildAttentionItems(attentionSurveys, questionsBySurvey);
-    const upcomingResearch = buildUpcomingResearch(attentionSurveys, Date.now(), upcomingLimit);
+    const now = new Date();
+    const allAttentionItems = buildAttentionItems(attentionSurveys, questionsBySurvey, now.getTime());
+    const upcomingResearchBase = buildUpcomingResearch(attentionSurveys, now.getTime(), upcomingLimit);
     const responseActivity = await buildResponseActivity(responseActivityRange);
+    const responseHeatmap = await buildResponseHeatmap();
+    const responsePulse = await buildResponsePulse();
+    const researchHealthResponseCounts = await getResearchHealthResponseCounts(attentionSurveyIds, now);
+    const researchHealth = buildResearchHealth(attentionSurveys, questionsBySurvey, researchHealthResponseCounts);
+    const surveyAchievements = buildSurveyAchievements(attentionSurveys, questionsBySurvey, researchHealthResponseCounts, now.getTime());
+    const achievementsBySurvey = new Map(surveyAchievements.map(item => [Number(item.surveyId), item]));
+    const upcomingResearch = upcomingResearchBase.map(item => ({ ...item, badges: achievementsBySurvey.get(Number(item.surveyId))?.badges || [] }));
+    const decoratedRecentSurveys = recentSurveys.map(survey => ({
+      ...survey,
+      badges: achievementsBySurvey.get(Number(survey.id))?.badges || [],
+      highestTargetMilestone: achievementsBySurvey.get(Number(survey.id))?.highestTargetMilestone ?? null
+    }));
+    const decoratedResearchHealth = researchHealth.map(item => ({ ...item, badges: achievementsBySurvey.get(Number(item.surveyId))?.badges || [] }));
 
     return res.json({
       totalSurveys: totalSurveysRow ? totalSurveysRow.count : 0,
       activeSurveys: activeSurveysRow ? activeSurveysRow.count : 0,
       closedSurveys: closedSurveysRow ? closedSurveysRow.count : 0,
       totalResponses: totalResponsesRow ? totalResponsesRow.count : 0,
-      recentSurveys,
+      recentSurveys: decoratedRecentSurveys,
       attentionItems: allAttentionItems.slice(0, attentionLimit),
       totalAttentionItems: allAttentionItems.length,
       upcomingResearch,
-      responseActivity
+      responseActivity,
+      responseHeatmap,
+      responsePulse,
+      researchHealth: decoratedResearchHealth,
+      surveyAchievements
     });
   } catch (err) {
     console.error('Dashboard error:', err);
     return res.status(500).json({ error: 'Failed to load dashboard metrics' });
+  }
+});
+
+app.get('/api/dashboard/pulse', requireAuth, async (_req, res) => {
+  try {
+    const now = new Date();
+    const pulse = await buildResponsePulse(now);
+    return res.json({ ...pulse, milestoneSurveys: await buildMilestoneSurveySnapshot(now) });
+  } catch (err) {
+    console.error('Dashboard response pulse error:', err);
+    return res.status(500).json({ error: 'Failed to load response pulse' });
   }
 });
 
@@ -930,11 +1240,23 @@ app.delete('/api/notes/:id', requireAuth, async (req, res) => {
 
 app.get('/api/activity', requireAuth, async (req, res) => {
   try {
-    const requested = req.query.limit ? Number.parseInt(req.query.limit, 10) : 20;
+    const limitValue = typeof req.query.limit === 'string' ? req.query.limit.trim() : '';
+    const requested = /^[1-9]\d*$/.test(limitValue) ? Number(limitValue) : 20;
     const limit = Number.isSafeInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 20;
     const rows = await dbAll(`SELECT a.*, s.title AS survey_title FROM activity_logs a LEFT JOIN surveys s ON s.id = a.survey_id
       ORDER BY a.created_at DESC, a.id DESC LIMIT ?`, [limit]);
-    return res.json(rows.map(row => ({ ...row, details: safeJson(row.details_json, null) })));
+    return res.json(rows.map(row => {
+      const details = safeJson(row.details_json, null);
+      return {
+        ...row,
+        details,
+        // Camel-case aliases support compact dashboard renderers while retaining
+        // the existing activity-history fields for current callers.
+        surveyId: row.survey_id || null,
+        surveyTitle: row.survey_title || null,
+        createdAt: row.created_at
+      };
+    }));
   } catch (_) { return res.status(500).json({ error: 'Failed to load activity history.' }); }
 });
 
@@ -2253,3 +2575,15 @@ if (require.main === module) {
 
 // Export Express app for Vercel / serverless runtime
 module.exports = app;
+module.exports.getResponseActivityWindow = getResponseActivityWindow;
+module.exports.getResponsePulseWindow = getResponsePulseWindow;
+module.exports.calculateResearchHealth = calculateResearchHealth;
+module.exports.researchHealthLabel = researchHealthLabel;
+module.exports.deadlineRunwayNormalized = deadlineRunwayNormalized;
+module.exports.recentActivityNormalized = recentActivityNormalized;
+module.exports.buildResearchHealth = buildResearchHealth;
+module.exports.buildResponseHeatmap = buildResponseHeatmap;
+module.exports.responseHeatmapLevel = responseHeatmapLevel;
+module.exports.highestTargetMilestone = highestTargetMilestone;
+module.exports.buildAchievementBadges = buildAchievementBadges;
+module.exports.buildSurveyAchievements = buildSurveyAchievements;

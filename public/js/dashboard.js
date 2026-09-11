@@ -7,10 +7,28 @@ let selectedActivityRange = 7;
 let dashboardRequestController = null;
 let latestResponseActivity = null;
 let activityResizeFrame = null;
+const RESPONSE_PULSE_INTERVAL_MS = 45 * 1000;
+let responsePulseIntervalId = null;
+let responsePulseRequestController = null;
+let responsePulseBaseline = null;
+let responsePulseLastSuccessfulAt = 0;
+let responsePulseCelebrationTimer = null;
+let milestoneCelebrationTimer = null;
+const commandPaletteState = {
+  activeIndex: -1,
+  previousFocus: null,
+  results: [],
+  surveys: null,
+  surveyRequest: null,
+  surveyError: ''
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
   if (!user) return;
+
+  initializeCommandPalette();
+  syncDashboardQuickActions();
 
   document.querySelectorAll('[data-activity-range]').forEach(button => {
     button.addEventListener('click', () => {
@@ -28,16 +46,192 @@ document.addEventListener('DOMContentLoaded', async () => {
       drawResponseActivityChart(latestResponseActivity);
     });
   });
-  loadDashboardData();
+  document.addEventListener('visibilitychange', handleResponsePulseVisibility);
+  await loadDashboardData();
+  startResponsePulsePolling();
 });
+
+function workspaceActions() {
+  return window.CommandPaletteUtils?.getWorkspaceActions?.() || [];
+}
+
+function syncDashboardQuickActions() {
+  const actionsById = new Map(workspaceActions().map(action => [action.id, action]));
+  document.querySelectorAll('[data-workspace-action]').forEach(link => {
+    const action = actionsById.get(link.dataset.workspaceAction);
+    if (action) link.href = action.href;
+  });
+}
+
+function initializeCommandPalette() {
+  const dialog = document.getElementById('command-palette-dialog');
+  const opener = document.getElementById('btn-command-palette');
+  const closeButton = document.getElementById('btn-command-palette-close');
+  const input = document.getElementById('command-palette-input');
+  if (!dialog || !opener || !closeButton || !input || dialog.dataset.initialized === 'true') return;
+  dialog.dataset.initialized = 'true';
+
+  opener.addEventListener('click', openCommandPalette);
+  closeButton.addEventListener('click', closeCommandPalette);
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) closeCommandPalette();
+  });
+  dialog.addEventListener('cancel', event => {
+    event.preventDefault();
+    closeCommandPalette();
+  });
+  dialog.addEventListener('close', restoreCommandPaletteFocus);
+  dialog.addEventListener('keydown', trapCommandPaletteFocus);
+  input.addEventListener('input', () => {
+    commandPaletteState.activeIndex = 0;
+    renderCommandPaletteResults();
+  });
+  input.addEventListener('keydown', handleCommandPaletteKeys);
+  document.addEventListener('keydown', event => {
+    const isShortcut = (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLocaleLowerCase() === 'k';
+    if (!isShortcut) return;
+    event.preventDefault();
+    if (dialog.open) closeCommandPalette();
+    else openCommandPalette();
+  });
+}
+
+function openCommandPalette() {
+  const dialog = document.getElementById('command-palette-dialog');
+  const input = document.getElementById('command-palette-input');
+  if (!dialog || !input || dialog.open) return;
+  commandPaletteState.previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  commandPaletteState.activeIndex = 0;
+  commandPaletteState.surveyError = '';
+  input.value = '';
+  dialog.showModal();
+  document.body.classList.add('command-palette-open');
+  renderCommandPaletteResults();
+  window.requestAnimationFrame(() => input.focus());
+  loadPaletteSurveys();
+}
+
+function closeCommandPalette() {
+  const dialog = document.getElementById('command-palette-dialog');
+  if (dialog?.open) dialog.close();
+}
+
+function restoreCommandPaletteFocus() {
+  document.body.classList.remove('command-palette-open');
+  const previous = commandPaletteState.previousFocus;
+  commandPaletteState.previousFocus = null;
+  if (previous?.isConnected) previous.focus();
+}
+
+function trapCommandPaletteFocus(event) {
+  if (event.key !== 'Tab') return;
+  const dialog = event.currentTarget;
+  const focusable = Array.from(dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+    .filter(element => !element.hidden && element.getClientRects().length);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function commandPaletteCommands() {
+  const staticCommands = workspaceActions().map(action => ({ ...action, category: 'Actions' }));
+  return staticCommands.concat(window.CommandPaletteUtils?.buildSurveyCommands?.(commandPaletteState.surveys) || []);
+}
+
+function renderCommandPaletteResults() {
+  const input = document.getElementById('command-palette-input');
+  const results = document.getElementById('command-palette-results');
+  const message = document.getElementById('command-palette-message');
+  if (!input || !results || !message || !window.CommandPaletteUtils) return;
+  commandPaletteState.results = window.CommandPaletteUtils.rankCommands(commandPaletteCommands(), input.value);
+  if (commandPaletteState.activeIndex >= commandPaletteState.results.length) commandPaletteState.activeIndex = commandPaletteState.results.length - 1;
+  if (commandPaletteState.activeIndex < 0 && commandPaletteState.results.length) commandPaletteState.activeIndex = 0;
+  results.replaceChildren();
+  commandPaletteState.results.forEach((command, index) => {
+    const option = document.createElement('div');
+    option.id = `command-palette-option-${index}`;
+    option.className = `command-palette-option${index === commandPaletteState.activeIndex ? ' is-active' : ''}`;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', index === commandPaletteState.activeIndex ? 'true' : 'false');
+    option.dataset.index = String(index);
+    const icon = document.createElement('span'); icon.className = 'command-palette-option-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = command.icon || '→';
+    const copy = document.createElement('span'); copy.className = 'command-palette-option-copy';
+    const label = document.createElement('strong'); label.textContent = command.label;
+    const description = document.createElement('small'); description.textContent = command.description || '';
+    const category = document.createElement('span'); category.className = 'command-palette-option-category'; category.textContent = command.category || 'Actions';
+    copy.append(label, description); option.append(icon, copy, category);
+    option.addEventListener('mouseenter', () => { commandPaletteState.activeIndex = index; renderCommandPaletteResults(); });
+    option.addEventListener('click', () => executeCommandPaletteResult(index));
+    results.appendChild(option);
+  });
+  if (commandPaletteState.results.length) input.setAttribute('aria-activedescendant', `command-palette-option-${commandPaletteState.activeIndex}`);
+  else input.removeAttribute('aria-activedescendant');
+  if (commandPaletteState.surveyError) message.textContent = `${commandPaletteState.surveyError} Static commands remain available.`;
+  else if (!commandPaletteState.results.length) message.textContent = 'No matching commands or surveys.';
+  else message.textContent = `${commandPaletteState.results.length} command${commandPaletteState.results.length === 1 ? '' : 's'} available.`;
+}
+
+function handleCommandPaletteKeys(event) {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    commandPaletteState.activeIndex = window.CommandPaletteUtils.nextCommandIndex(commandPaletteState.activeIndex, commandPaletteState.results.length, event.key === 'ArrowDown' ? 1 : -1);
+    renderCommandPaletteResults();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    executeCommandPaletteResult(commandPaletteState.activeIndex);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeCommandPalette();
+  }
+}
+
+function executeCommandPaletteResult(index) {
+  const command = commandPaletteState.results[index];
+  if (!command?.href) return;
+  window.location.assign(command.href);
+}
+
+async function loadPaletteSurveys() {
+  if (Array.isArray(commandPaletteState.surveys)) return;
+  if (commandPaletteState.surveyRequest) return commandPaletteState.surveyRequest;
+  commandPaletteState.surveyRequest = fetch('/api/surveys')
+    .then(async response => {
+      const surveys = await response.json();
+      if (!response.ok || !Array.isArray(surveys)) throw new Error('Survey search is unavailable.');
+      commandPaletteState.surveys = surveys;
+      commandPaletteState.surveyError = '';
+      renderCommandPaletteResults();
+    })
+    .catch(error => {
+      console.warn('Command palette survey search error:', error);
+      commandPaletteState.surveyError = 'Survey search could not be loaded.';
+      renderCommandPaletteResults();
+    })
+    .finally(() => { commandPaletteState.surveyRequest = null; });
+  return commandPaletteState.surveyRequest;
+}
 
 async function loadDashboardData() {
   const tbody = document.getElementById('recent-surveys-tbody');
   const activityStatus = document.getElementById('response-activity-status');
+  const timeline = document.getElementById('recent-activity-timeline');
   if (dashboardRequestController) dashboardRequestController.abort();
   dashboardRequestController = new AbortController();
   const requestController = dashboardRequestController;
   activityStatus.textContent = 'Loading activity data…';
+  timeline.setAttribute('aria-busy', 'true');
+  const activityTimelineRequest = fetch('/api/activity?limit=6', { signal: requestController.signal })
+    .then(async response => {
+      if (!response.ok) throw new Error('Failed to load recent workspace activity');
+      return response.json();
+    });
 
   try {
     const res = await fetch(`/api/dashboard?range=${selectedActivityRange}`, { signal: requestController.signal });
@@ -53,6 +247,18 @@ async function loadDashboardData() {
     renderAttentionItems(data.attentionItems || [], data.totalAttentionItems || 0);
     renderUpcomingResearch(data.upcomingResearch || []);
     renderResponseActivity(data.responseActivity);
+    renderResponseHeatmap(data.responseHeatmap);
+    renderResponsePulse(data.responsePulse);
+    renderResearchHealth(data.researchHealth || []);
+    renderSurveyAchievements(data.surveyAchievements || []);
+    evaluateMilestoneAchievements(data.surveyAchievements || []);
+    try {
+      renderActivityTimeline(await activityTimelineRequest);
+    } catch (activityError) {
+      if (activityError.name === 'AbortError') return;
+      console.error('Recent activity timeline error:', activityError);
+      renderActivityTimelineError();
+    }
 
     // Render Recent Surveys
     if (!data.recentSurveys || data.recentSurveys.length === 0) {
@@ -88,6 +294,7 @@ async function loadDashboardData() {
       tr.innerHTML = `
         <td>
           <div style="font-weight: 600; color: var(--color-text);">${escapeHtml(survey.title)}</div>
+          ${achievementBadgeMarkup(survey.badges, 2)}
           ${survey.description ? `<div style="font-size: 12px; color: var(--color-text-muted); max-width: 380px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(survey.description)}</div>` : ''}
         </td>
         <td>
@@ -113,6 +320,7 @@ async function loadDashboardData() {
       tbody.appendChild(tr);
     });
   } catch (err) {
+    await activityTimelineRequest.catch(() => null);
     if (err.name === 'AbortError') return;
     console.error('Dashboard load error:', err);
     tbody.innerHTML = `
@@ -126,8 +334,395 @@ async function loadDashboardData() {
     renderAttentionError();
     renderUpcomingResearchError();
     renderResponseActivityError();
+    renderResponseHeatmapError();
+    renderActivityTimelineError();
+    renderResponsePulseError();
+    renderResearchHealthError();
+    renderSurveyAchievementsError();
     showToast('Failed to load dashboard metrics', 'error');
   }
+}
+
+function achievementBadgeMarkup(badges, limit = 2) {
+  if (!Array.isArray(badges) || !badges.length) return '';
+  const visible = badges.slice(0, limit).map(badge => `<span class="achievement-badge achievement-badge-${escapeHtml(badge.id || 'default')}" title="${escapeHtml(badge.description || badge.label || 'Achievement')}">${escapeHtml(badge.label || 'Achievement')}</span>`).join('');
+  const remaining = badges.length - limit;
+  return `<span class="achievement-badges" aria-label="${escapeHtml(badges.map(badge => badge.label).join(', '))}">${visible}${remaining > 0 ? `<span class="achievement-badge achievement-badge-more" title="${escapeHtml(badges.slice(limit).map(badge => badge.label).join(', '))}">+${remaining}</span>` : ''}</span>`;
+}
+
+function renderSurveyAchievements(items) {
+  const list = document.getElementById('milestone-achievements-list');
+  if (!list) return;
+  list.setAttribute('aria-busy', 'false');
+  const meaningful = (Array.isArray(items) ? items : []).filter(item => item.highestTargetMilestone || item.badges?.length).slice(0, 5);
+  if (!meaningful.length) {
+    list.innerHTML = '<div class="milestone-achievements-empty">No milestones yet. Add a response target, deadline, or complete survey setup to unlock deterministic achievements.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  meaningful.forEach(item => {
+    const row = document.createElement('article');
+    row.className = 'milestone-achievement-item';
+    const hasTarget = Number.isSafeInteger(item.targetResponses) && item.targetResponses > 0;
+    const progress = hasTarget ? Math.max(0, Math.min(100, Math.round((Number(item.responseCount || 0) / item.targetResponses) * 100))) : null;
+    row.innerHTML = `
+      <div class="milestone-achievement-main">
+        <h3>${escapeHtml(item.title || 'Research survey')}</h3>
+        <p>${hasTarget ? `${Number(item.responseCount || 0)} / ${item.targetResponses} responses · ${progress}% toward target` : 'Achievement status is based on the current survey setup and response activity.'}</p>
+        ${achievementBadgeMarkup(item.badges, 3)}
+      </div>
+      ${hasTarget ? `<span class="milestone-progress" aria-label="${escapeHtml(item.title || 'Survey')} reached ${progress}% of its response target">${progress}%</span>` : ''}
+    `;
+    list.appendChild(row);
+  });
+}
+
+function renderSurveyAchievementsError() {
+  const list = document.getElementById('milestone-achievements-list');
+  if (!list) return;
+  list.setAttribute('aria-busy', 'false');
+  list.innerHTML = '<div class="milestone-achievements-empty">Achievements could not be loaded. Refresh the dashboard to try again.</div>';
+}
+
+function evaluateMilestoneAchievements(surveys) {
+  if (!window.MilestoneUtils || !Array.isArray(surveys)) return;
+  const celebrations = window.MilestoneUtils.evaluateMilestoneAcknowledgements(surveys, window.localStorage);
+  if (celebrations.length) showMilestoneCelebration(celebrations[0]);
+}
+
+function showMilestoneCelebration(achievement) {
+  const banner = document.getElementById('milestone-celebration');
+  if (!banner) return;
+  const targetReached = achievement.milestone === 100;
+  banner.textContent = targetReached
+    ? `Target achieved! ${achievement.title} reached ${achievement.responseCount} / ${achievement.targetResponses} responses.`
+    : `Target milestone reached! ${achievement.title} reached ${achievement.milestone}% of its response target.`;
+  banner.hidden = false;
+  banner.classList.remove('is-visible');
+  window.requestAnimationFrame(() => banner.classList.add('is-visible'));
+  if (milestoneCelebrationTimer) window.clearTimeout(milestoneCelebrationTimer);
+  milestoneCelebrationTimer = window.setTimeout(() => {
+    banner.classList.remove('is-visible');
+    banner.hidden = true;
+    milestoneCelebrationTimer = null;
+  }, 6000);
+}
+
+function heatmapDateDetails(date) {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  return {
+    weekday: value.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' }),
+    full: value.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  };
+}
+
+function renderResponseHeatmap(heatmap) {
+  const grid = document.getElementById('response-heatmap-grid');
+  const labels = document.getElementById('response-heatmap-weekdays');
+  const range = document.getElementById('response-heatmap-range');
+  const selected = document.getElementById('response-heatmap-selected');
+  if (!heatmap || !Array.isArray(heatmap.days) || heatmap.days.length !== 84) {
+    renderResponseHeatmapError();
+    return;
+  }
+
+  const firstDay = heatmapDateDetails(heatmap.days[0].date);
+  labels.innerHTML = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(`${heatmap.days[0].date}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + index);
+    return `<span>${escapeHtml(date.toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' }))}</span>`;
+  }).join('');
+  range.textContent = `${firstDay.full} to ${heatmapDateDetails(heatmap.days[heatmap.days.length - 1].date).full} · Last 12 weeks`;
+  grid.setAttribute('aria-busy', 'false');
+  grid.replaceChildren();
+  if (!heatmap.totalResponses) selected.textContent = 'No responses were collected in this period.';
+  else selected.textContent = 'Select a day to view its response count.';
+
+  const selectDay = (button, day) => {
+    grid.querySelectorAll('.response-heatmap-cell.is-selected').forEach(cell => cell.classList.remove('is-selected'));
+    button.classList.add('is-selected');
+    const details = heatmapDateDetails(day.date);
+    selected.textContent = `Selected: ${details.full} — ${day.count} response${day.count === 1 ? '' : 's'}.`;
+  };
+  heatmap.days.forEach(day => {
+    const count = Math.max(0, Number(day.count) || 0);
+    const level = Math.max(0, Math.min(4, Number(day.level) || 0));
+    const details = heatmapDateDetails(day.date);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `response-heatmap-cell heatmap-level-${level}`;
+    button.setAttribute('role', 'gridcell');
+    button.setAttribute('aria-label', `${details.full}: ${count} response${count === 1 ? '' : 's'}`);
+    button.setAttribute('title', `${details.full}: ${count} response${count === 1 ? '' : 's'}`);
+    button.addEventListener('click', () => selectDay(button, { ...day, count }));
+    button.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectDay(button, { ...day, count }); }
+    });
+    grid.appendChild(button);
+  });
+}
+
+function renderResponseHeatmapError() {
+  const grid = document.getElementById('response-heatmap-grid');
+  const range = document.getElementById('response-heatmap-range');
+  const selected = document.getElementById('response-heatmap-selected');
+  grid.setAttribute('aria-busy', 'false');
+  grid.replaceChildren();
+  range.textContent = 'Response calendar is currently unavailable.';
+  selected.textContent = 'Response calendar data could not be loaded. Refresh the dashboard to try again.';
+}
+
+function renderResearchHealth(items) {
+  const list = document.getElementById('research-health-list');
+  list.setAttribute('aria-busy', 'false');
+  if (!Array.isArray(items) || !items.length) {
+    list.innerHTML = '<div class="research-health-empty">No active, non-archived surveys are available for a health review.</div>';
+    return;
+  }
+
+  const componentLabels = {
+    readiness: 'Readiness',
+    collection: 'Collection progress',
+    deadline: 'Deadline runway',
+    recentActivity: 'Recent activity'
+  };
+  list.replaceChildren();
+  items.slice(0, 5).forEach(item => {
+    const row = document.createElement('article');
+    row.className = 'research-health-item';
+    const components = Object.entries(componentLabels).map(([key, label]) => {
+      const component = item.components?.[key];
+      if (!component?.available || !Number.isFinite(component.score)) {
+        return `<li><span>${escapeHtml(label)}</span><strong>Not configured</strong></li>`;
+      }
+      const score = Math.max(0, Math.min(100, Number(component.score)));
+      return `<li><span>${escapeHtml(label)}</span><strong>${score}</strong><progress value="${score}" max="100" aria-label="${escapeHtml(label)}: ${score} out of 100"></progress></li>`;
+    }).join('');
+    const score = Math.max(0, Math.min(100, Number(item.score) || 0));
+    row.innerHTML = `
+      <div class="research-health-main">
+        <div class="research-health-title-row"><h3>${escapeHtml(item.title || 'Research survey')}</h3>${achievementBadgeMarkup(item.badges, 2)}</div>
+        <p class="research-health-summary">${escapeHtml(item.summary || 'Health is based on current authorized survey data.')}</p>
+        <ul class="research-health-components">${components}</ul>
+        ${item.limitedData ? '<span class="research-health-limited">Limited data: this score uses fewer available components.</span>' : ''}
+      </div>
+      <div class="research-health-score" aria-label="${escapeHtml(item.title || 'Survey')} health score: ${score} out of 100, ${escapeHtml(item.label || 'Unrated')}"><strong>${score}</strong><span>${escapeHtml(item.label || 'Unrated')}</span></div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function renderResearchHealthError() {
+  const list = document.getElementById('research-health-list');
+  list.setAttribute('aria-busy', 'false');
+  list.innerHTML = '<div class="research-health-empty">Research health could not be calculated. Refresh the dashboard to try again.</div>';
+}
+
+function responsePulseDelta(previousTotal, nextTotal) {
+  if (!Number.isSafeInteger(nextTotal) || nextTotal < 0) return null;
+  if (!Number.isSafeInteger(previousTotal) || previousTotal < 0) return null;
+  return nextTotal > previousTotal ? nextTotal - previousTotal : null;
+}
+
+function pulseCount(value) {
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
+function renderResponsePulse(pulse) {
+  const totalResponses = pulseCount(pulse?.totalResponses);
+  const todayCount = pulseCount(pulse?.todayCount);
+  const lastHourCount = pulseCount(pulse?.lastHourCount);
+  const activeSurveyCount = pulseCount(pulse?.activeSurveyCount);
+  if (totalResponses === null || todayCount === null || lastHourCount === null || activeSurveyCount === null) {
+    renderResponsePulseError();
+    return;
+  }
+
+  const card = document.querySelector('.dashboard-response-pulse-card');
+  const status = document.getElementById('response-pulse-status');
+  const latest = document.getElementById('response-pulse-latest');
+  const hint = document.getElementById('response-pulse-hint');
+  const delta = responsePulseDelta(responsePulseBaseline, totalResponses);
+  responsePulseBaseline = totalResponses;
+  responsePulseLastSuccessfulAt = Date.now();
+
+  card.setAttribute('aria-busy', 'false');
+  document.getElementById('response-pulse-today').textContent = todayCount;
+  document.getElementById('response-pulse-last-hour').textContent = lastHourCount;
+  if (activeSurveyCount > 0) {
+    status.textContent = `Collecting · Auto-refreshing`;
+    status.className = 'response-pulse-status is-collecting';
+  } else {
+    status.textContent = 'No active surveys';
+    status.className = 'response-pulse-status';
+  }
+
+  const responseTime = pulse.latestResponseAt ? activityTimeDetails(pulse.latestResponseAt) : null;
+  latest.textContent = responseTime ? responseTime.relative : 'No responses yet';
+  if (responseTime?.absolute) {
+    latest.setAttribute('title', responseTime.absolute);
+    latest.setAttribute('datetime', pulse.latestResponseAt);
+  } else {
+    latest.removeAttribute('title');
+    latest.removeAttribute('datetime');
+  }
+  hint.textContent = `Last checked just now · ${activeSurveyCount} active survey${activeSurveyCount === 1 ? '' : 's'}.`;
+  hint.className = 'response-pulse-hint';
+  if (delta) announceResponsePulseDelta(delta);
+  if (Array.isArray(pulse.milestoneSurveys)) evaluateMilestoneAchievements(pulse.milestoneSurveys);
+}
+
+function announceResponsePulseDelta(delta) {
+  const message = document.getElementById('response-pulse-new');
+  if (responsePulseCelebrationTimer) window.clearTimeout(responsePulseCelebrationTimer);
+  message.textContent = `+${delta} new response${delta === 1 ? '' : 's'}`;
+  message.className = 'response-pulse-new is-new';
+  responsePulseCelebrationTimer = window.setTimeout(() => {
+    message.textContent = '';
+    message.className = 'response-pulse-new';
+    responsePulseCelebrationTimer = null;
+  }, 5000);
+}
+
+function renderResponsePulseError() {
+  const card = document.querySelector('.dashboard-response-pulse-card');
+  const status = document.getElementById('response-pulse-status');
+  const hint = document.getElementById('response-pulse-hint');
+  card?.setAttribute('aria-busy', 'false');
+  status.textContent = 'Refresh delayed';
+  status.className = 'response-pulse-status';
+  hint.textContent = 'Latest refresh failed; showing the last known response data.';
+  hint.className = 'response-pulse-hint is-stale';
+}
+
+async function refreshResponsePulse() {
+  if (document.hidden || responsePulseRequestController) return;
+  const controller = new AbortController();
+  responsePulseRequestController = controller;
+  try {
+    const response = await fetch('/api/dashboard/pulse', { signal: controller.signal });
+    if (!response.ok) throw new Error('Failed to load response pulse');
+    renderResponsePulse(await response.json());
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.error('Dashboard response pulse error:', err);
+      renderResponsePulseError();
+    }
+  } finally {
+    if (responsePulseRequestController === controller) responsePulseRequestController = null;
+  }
+}
+
+function startResponsePulsePolling() {
+  if (document.hidden || responsePulseIntervalId !== null) return;
+  responsePulseIntervalId = window.setInterval(refreshResponsePulse, RESPONSE_PULSE_INTERVAL_MS);
+}
+
+function stopResponsePulsePolling() {
+  if (responsePulseIntervalId !== null) {
+    window.clearInterval(responsePulseIntervalId);
+    responsePulseIntervalId = null;
+  }
+  if (responsePulseRequestController) responsePulseRequestController.abort();
+}
+
+function handleResponsePulseVisibility() {
+  if (document.hidden) {
+    stopResponsePulsePolling();
+    return;
+  }
+  if (!responsePulseLastSuccessfulAt || Date.now() - responsePulseLastSuccessfulAt >= RESPONSE_PULSE_INTERVAL_MS) {
+    refreshResponsePulse();
+  }
+  startResponsePulsePolling();
+}
+
+function activityActionPresentation(item) {
+  const action = String(item.action || '').toUpperCase();
+  const surveyTitle = item.surveyTitle || item.survey_title;
+  const details = item.details && typeof item.details === 'object' ? item.details : {};
+  const isPrivateNote = action.startsWith('NOTE_');
+  const fallbackName = !isPrivateNote && typeof details.name === 'string' ? details.name : '';
+  const name = surveyTitle || fallbackName || (isPrivateNote ? 'Research workspace' : 'Workspace item');
+  const actions = {
+    SURVEY_CREATED: { icon: '+', text: details.source === 'template' ? 'was created from a template' : 'was created' },
+    SURVEY_DUPLICATED: { icon: '⧉', text: 'was duplicated as a draft' },
+    SURVEY_UPDATED: { icon: '✎', text: 'was updated' },
+    SURVEY_PUBLISHED: { icon: '↗', text: 'was published' },
+    SURVEY_CLOSED: { icon: '■', text: 'was closed' },
+    SURVEY_ARCHIVED: { icon: '↓', text: 'was archived' },
+    SURVEY_RESTORED: { icon: '↺', text: 'was restored' },
+    SURVEY_PINNED: { icon: '●', text: 'was pinned' },
+    SURVEY_UNPINNED: { icon: '○', text: 'was unpinned' },
+    SURVEY_MOVED_COLLECTION: { icon: '→', text: 'was moved to a collection' },
+    TARGET_UPDATED: { icon: '◎', text: 'had its response target updated' },
+    TEMPLATE_CREATED: { icon: '+', text: 'template was created' },
+    TEMPLATE_UPDATED: { icon: '✎', text: 'template was updated' },
+    TEMPLATE_DELETED: { icon: '−', text: 'template was deleted' },
+    COLLECTION_CREATED: { icon: '+', text: 'collection was created' },
+    COLLECTION_UPDATED: { icon: '✎', text: 'collection was updated' },
+    COLLECTION_DELETED: { icon: '−', text: 'collection was deleted' },
+    NOTE_CREATED: { icon: '•', text: 'received a private research-note update' },
+    NOTE_UPDATED: { icon: '•', text: 'received a private research-note update' },
+    NOTE_DELETED: { icon: '•', text: 'had a private research note removed' }
+  };
+  return { name, ...(actions[action] || { icon: '•', text: 'was updated in the workspace' }) };
+}
+
+function activityTimeDetails(value, now = Date.now()) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { relative: 'Date unavailable', absolute: '' };
+  const elapsedMs = Math.max(0, now - date.getTime());
+  const minutes = Math.floor(elapsedMs / 60000);
+  if (minutes < 1) return { relative: 'Just now', absolute: date.toLocaleString() };
+  if (minutes < 60) return { relative: `${minutes} minute${minutes === 1 ? '' : 's'} ago`, absolute: date.toLocaleString() };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { relative: `${hours} hour${hours === 1 ? '' : 's'} ago`, absolute: date.toLocaleString() };
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  if (date >= yesterday && date < today) return { relative: 'Yesterday', absolute: date.toLocaleString() };
+  return {
+    relative: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+    absolute: date.toLocaleString()
+  };
+}
+
+function activityLinkFor(item) {
+  const surveyId = Number(item.surveyId || item.survey_id);
+  return Number.isSafeInteger(surveyId) && surveyId > 0
+    ? `create-survey.html?edit=${encodeURIComponent(surveyId)}`
+    : 'surveys.html';
+}
+
+function renderActivityTimeline(items) {
+  const timeline = document.getElementById('recent-activity-timeline');
+  timeline.setAttribute('aria-busy', 'false');
+  if (!Array.isArray(items) || !items.length) {
+    timeline.innerHTML = '<div class="timeline-empty-state">No recent workspace activity yet.</div>';
+    return;
+  }
+  timeline.replaceChildren();
+  items.forEach(item => {
+    const presentation = activityActionPresentation(item);
+    const time = activityTimeDetails(item.createdAt || item.created_at);
+    const row = document.createElement('article');
+    row.className = 'timeline-item';
+    row.innerHTML = `
+      <div class="timeline-marker" aria-hidden="true">${escapeHtml(presentation.icon)}</div>
+      <div class="timeline-copy">
+        <p><a href="${activityLinkFor(item)}">${escapeHtml(presentation.name)}</a> ${escapeHtml(presentation.text)}.</p>
+        <time${time.absolute ? ` title="${escapeHtml(time.absolute)}" datetime="${escapeHtml(item.createdAt || item.created_at || '')}"` : ''}>${escapeHtml(time.relative)}</time>
+      </div>
+    `;
+    timeline.appendChild(row);
+  });
+}
+
+function renderActivityTimelineError() {
+  const timeline = document.getElementById('recent-activity-timeline');
+  timeline.setAttribute('aria-busy', 'false');
+  timeline.innerHTML = '<div class="timeline-empty-state">Recent workspace activity could not be loaded. Refresh the dashboard to try again.</div>';
 }
 
 function syncActivityRangeControls() {
@@ -310,6 +905,7 @@ function renderUpcomingResearch(items) {
         <p class="upcoming-research-summary">${escapeHtml(summary)}</p>
         ${hasTarget ? `<div class="upcoming-progress-wrap"><progress value="${progress}" max="100" aria-label="${escapeHtml(item.title)} is ${progress}% toward its response target"></progress><span>${progress}%</span></div>` : ''}
         ${item.deadline ? `<p class="upcoming-deadline">${escapeHtml(upcomingDeadlineText(item))}</p>` : ''}
+        ${achievementBadgeMarkup(item.badges, 2)}
       </div>
       <a class="btn btn-secondary btn-sm upcoming-research-action" href="analytics.html?id=${encodeURIComponent(item.surveyId)}">Analytics <span aria-hidden="true">→</span></a>
     `;

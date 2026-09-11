@@ -41,6 +41,10 @@ const {
   weeklyResponseCount
 } = require('./public/js/weekly-challenge.js');
 const {
+  activityPresentation,
+  activityTimeDetails
+} = require('./public/js/activity-feed.js');
+const {
   getResponseActivityWindow,
   getResponsePulseWindow,
   responseHeatmapLevel,
@@ -1065,6 +1069,7 @@ async function runTests() {
     const dashboardScript = await request('GET', '/js/dashboard.js');
     const metricAnimationScript = await request('GET', '/js/metric-animation.js');
     const weeklyChallengeScript = await request('GET', '/js/weekly-challenge.js');
+    const activityFeedScript = await request('GET', '/js/activity-feed.js');
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
       dashboardPage.raw.includes('research-command-center') && dashboardPage.raw.includes('command-center-greeting') &&
@@ -1073,6 +1078,7 @@ async function runTests() {
       dashboardPage.raw.includes('js/metric-animation.js') &&
       dashboardPage.raw.includes('weekly-challenge-card') && dashboardPage.raw.includes('weekly-challenge-progress') &&
       dashboardPage.raw.includes('js/weekly-challenge.js') &&
+      dashboardPage.raw.includes('js/activity-feed.js') &&
       dashboardPage.raw.includes('command-palette-dialog') && dashboardPage.raw.includes('command-palette-input') &&
       dashboardPage.raw.includes('Milestones &amp; Achievements') && dashboardPage.raw.includes('milestone-achievements-list') &&
       dashboardPage.raw.includes('Response Calendar') && dashboardPage.raw.includes('response-heatmap-grid') &&
@@ -1106,6 +1112,19 @@ async function runTests() {
       weeklyChallengeScript.status === 200 && weeklyChallengeScript.raw.includes('resolveWeeklyChallenge') &&
       dashboardScript.raw.includes('renderWeeklyChallenge'),
       'TEST 20b1e: Weekly research challenge utility and dashboard integration asset load'
+    );
+    const publishedActivity = activityPresentation({ action: 'survey_published', surveyTitle: '<b>Survey</b>' });
+    const privateNoteActivity = activityPresentation({ action: 'NOTE_CREATED', details: { name: '<b>private</b>' } });
+    const fallbackActivity = activityPresentation({ action: 'unknown_action', details: { email: 'hidden@example.com' } });
+    const justNow = activityTimeDetails('2026-09-10T12:00:30.000Z', Date.parse('2026-09-10T12:01:00.000Z'));
+    const yesterday = activityTimeDetails('2026-09-09T16:00:00.000Z', Date.parse('2026-09-10T16:00:00.000Z'));
+    assert(
+      activityFeedScript.status === 200 && publishedActivity.icon === 'publish' && publishedActivity.title === 'Survey published' &&
+      publishedActivity.entity === '<b>Survey</b>' && privateNoteActivity.entity === 'Research workspace' &&
+      fallbackActivity.title === 'Workspace activity recorded' && fallbackActivity.entity === 'Research workspace' &&
+      justNow.relative === 'Just now' && yesterday.relative === 'Yesterday' &&
+      activityTimeDetails('invalid date').relative === 'Date unavailable',
+      'TEST 20b1g: Activity feed maps known and fallback actions safely with readable relative timestamps'
     );
     const sundayUtc = new Date('2026-09-13T23:59:59.000Z');
     const mondayUtc = new Date('2026-09-14T00:00:00.000Z');

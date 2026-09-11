@@ -2514,6 +2514,25 @@ body.admin-page {
 .weekly-challenge-card[data-challenge-state="complete"] .weekly-challenge-state { border-color: var(--color-primary); background: var(--color-primary); color: var(--palette-cream); }
 .weekly-challenge-card[data-challenge-state="error"] .weekly-challenge-state { border-style: dashed; }
 
+.dashboard-timeline-card { overflow: hidden; border-radius: 16px; }
+.dashboard-timeline-header { align-items: flex-end; padding: 20px 22px; border-bottom: 1px solid var(--color-border); }
+.dashboard-timeline-header .card-title { margin-top: 1px; font-size: 18px; letter-spacing: -.025em; }
+.dashboard-timeline-header .card-subtitle { margin-top: 4px; }
+.recent-activity-timeline { padding: 3px 22px 8px; }
+.activity-feed-item { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: start; gap: 11px; padding: 14px 0; border-bottom: 1px solid var(--color-border); }
+.activity-feed-item:last-child { border-bottom: 0; }
+.activity-feed-icon { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-surface-secondary); color: var(--color-primary); }
+.activity-feed-icon svg { width: 16px; height: 16px; }
+.activity-feed-copy { min-width: 0; }
+.activity-feed-title { margin: 0; color: var(--color-text); font-size: 13px; font-weight: 800; line-height: 1.35; }
+.activity-feed-entity { display: inline-block; max-width: 100%; margin-top: 2px; overflow: hidden; color: var(--color-primary); font-size: 12px; font-weight: 700; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.activity-feed-entity:hover { text-decoration: underline; }
+.activity-feed-entity:focus-visible { border-radius: 3px; outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.activity-feed-metadata { margin: 2px 0 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.35; }
+.activity-feed-time { padding-top: 2px; color: var(--color-text-muted); font-size: 11px; font-weight: 700; text-align: right; white-space: nowrap; }
+.timeline-empty-state { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 100px; justify-content: center; padding: 18px; color: var(--color-text-muted); font-size: 12px; text-align: center; }
+.timeline-empty-state strong { color: var(--color-text); font-size: 13px; }
+
 .dashboard-recent-card { overflow: hidden; border-radius: 16px; }
 .dashboard-attention-card { margin: 0 0 19px; overflow: hidden; border-radius: 16px; }
 .dashboard-attention-header { align-items: flex-end; padding: 20px 22px; border-bottom: 1px solid var(--color-border); }
@@ -2549,6 +2568,8 @@ body.admin-page {
   .attention-list { padding-inline: 18px; }
   .dashboard-recent-card .card-header { align-items: flex-start; padding: 18px; }
   .weekly-challenge-card { padding: 18px; }
+  .dashboard-timeline-header { align-items: flex-start; padding: 18px; }
+  .recent-activity-timeline { padding-inline: 18px; }
 }
 
 @media (max-width: 420px) {
@@ -2567,6 +2588,8 @@ body.admin-page {
 @media (max-width: 560px) {
   .attention-item { grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 10px; }
   .attention-action { grid-column: 2; justify-self: start; margin-top: -2px; }
+  .activity-feed-item { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
+  .activity-feed-time { grid-column: 2; padding-top: 0; text-align: left; }
 }
 
 /* ===== REDESIGNED SURVEY MANAGEMENT ===== */

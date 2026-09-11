@@ -752,59 +752,11 @@ function handleResponsePulseVisibility() {
 }
 
 function activityActionPresentation(item) {
-  const action = String(item.action || '').toUpperCase();
-  const surveyTitle = item.surveyTitle || item.survey_title;
-  const details = item.details && typeof item.details === 'object' ? item.details : {};
-  const isPrivateNote = action.startsWith('NOTE_');
-  const fallbackName = !isPrivateNote && typeof details.name === 'string' ? details.name : (typeof details.email === 'string' ? details.email : '');
-  const name = surveyTitle || fallbackName || (isPrivateNote ? 'Research workspace' : 'Workspace item');
-  const actions = {
-    SURVEY_CREATED: { icon: '+', text: details.source === 'template' ? 'was created from a template' : 'was created' },
-    SURVEY_DUPLICATED: { icon: '⧉', text: 'was duplicated as a draft' },
-    SURVEY_UPDATED: { icon: '✎', text: 'was updated' },
-    SURVEY_PUBLISHED: { icon: '↗', text: 'was published' },
-    SURVEY_CLOSED: { icon: '■', text: 'was closed' },
-    SURVEY_ARCHIVED: { icon: '↓', text: 'was archived' },
-    SURVEY_RESTORED: { icon: '↺', text: 'was restored' },
-    SURVEY_PINNED: { icon: '●', text: 'was pinned' },
-    SURVEY_UNPINNED: { icon: '○', text: 'was unpinned' },
-    SURVEY_MOVED_COLLECTION: { icon: '→', text: 'was moved to a collection' },
-    TARGET_UPDATED: { icon: '◎', text: 'had its response target updated' },
-    TEMPLATE_CREATED: { icon: '+', text: 'template was created' },
-    TEMPLATE_UPDATED: { icon: '✎', text: 'template was updated' },
-    TEMPLATE_DELETED: { icon: '−', text: 'template was deleted' },
-    COLLECTION_CREATED: { icon: '+', text: 'collection was created' },
-    COLLECTION_UPDATED: { icon: '✎', text: 'collection was updated' },
-    COLLECTION_DELETED: { icon: '−', text: 'collection was deleted' },
-    TEAM_MEMBER_CREATED: { icon: '+', text: 'was added to the team' },
-    TEAM_MEMBER_UPDATED: { icon: '✎', text: 'team profile was updated' },
-    TEAM_MEMBER_DISABLED: { icon: '−', text: 'workspace access was removed' },
-    TEAM_MEMBER_ENABLED: { icon: '↺', text: 'workspace access was restored' },
-    TEAM_MEMBER_PASSWORD_RESET: { icon: '•', text: 'password was reset' },
-    PASSWORD_CHANGED: { icon: '•', text: 'account password was changed' },
-    NOTE_CREATED: { icon: '•', text: 'received a private research-note update' },
-    NOTE_UPDATED: { icon: '•', text: 'received a private research-note update' },
-    NOTE_DELETED: { icon: '•', text: 'had a private research note removed' }
-  };
-  return { name, ...(actions[action] || { icon: '•', text: 'was updated in the workspace' }) };
+  return window.ActivityFeedUtils?.activityPresentation?.(item) || { icon: 'activity', title: 'Workspace activity recorded', entity: 'Research workspace' };
 }
 
 function activityTimeDetails(value, now = Date.now()) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return { relative: 'Date unavailable', absolute: '' };
-  const elapsedMs = Math.max(0, now - date.getTime());
-  const minutes = Math.floor(elapsedMs / 60000);
-  if (minutes < 1) return { relative: 'Just now', absolute: date.toLocaleString() };
-  if (minutes < 60) return { relative: `${minutes} minute${minutes === 1 ? '' : 's'} ago`, absolute: date.toLocaleString() };
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return { relative: `${hours} hour${hours === 1 ? '' : 's'} ago`, absolute: date.toLocaleString() };
-  const today = new Date(now); today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-  if (date >= yesterday && date < today) return { relative: 'Yesterday', absolute: date.toLocaleString() };
-  return {
-    relative: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
-    absolute: date.toLocaleString()
-  };
+  return window.ActivityFeedUtils?.activityTimeDetails?.(value, now) || { relative: 'Date unavailable', absolute: '', dateTime: '' };
 }
 
 function activityLinkFor(item) {
@@ -818,23 +770,44 @@ function renderActivityTimeline(items) {
   const timeline = document.getElementById('recent-activity-timeline');
   timeline.setAttribute('aria-busy', 'false');
   if (!Array.isArray(items) || !items.length) {
-    timeline.innerHTML = '<div class="timeline-empty-state">No recent workspace activity yet.</div>';
+    const empty = document.createElement('div');
+    empty.className = 'timeline-empty-state';
+    const title = document.createElement('strong');
+    title.textContent = 'No recent workspace activity yet.';
+    const detail = document.createElement('span');
+    detail.textContent = 'Actions such as publishing a survey or receiving responses will appear here.';
+    empty.append(title, detail);
+    timeline.replaceChildren(empty);
     return;
   }
   timeline.replaceChildren();
   items.forEach(item => {
     const presentation = activityActionPresentation(item);
     const time = activityTimeDetails(item.createdAt || item.created_at);
-    const actorName = item.actor?.name || 'System';
+    const actorName = typeof item.actor?.name === 'string' && item.actor.name.trim() ? item.actor.name.trim() : '';
     const row = document.createElement('article');
-    row.className = 'timeline-item';
-    row.innerHTML = `
-      <div class="timeline-marker" aria-hidden="true">${escapeHtml(presentation.icon)}</div>
-      <div class="timeline-copy">
-        <p><span class="timeline-actor">${escapeHtml(actorName)}</span> <a href="${activityLinkFor(item)}">${escapeHtml(presentation.name)}</a> ${escapeHtml(presentation.text)}.</p>
-        <time${time.absolute ? ` title="${escapeHtml(time.absolute)}" datetime="${escapeHtml(item.createdAt || item.created_at || '')}"` : ''}>${escapeHtml(time.relative)}</time>
-      </div>
-    `;
+    row.className = 'activity-feed-item';
+    row.dataset.activityIcon = presentation.icon;
+    const icon = createActivityFeedIcon(presentation.icon);
+    const copy = document.createElement('div');
+    copy.className = 'activity-feed-copy';
+    const title = document.createElement('p');
+    title.className = 'activity-feed-title';
+    title.textContent = presentation.title;
+    const entity = document.createElement('a');
+    entity.className = 'activity-feed-entity';
+    entity.href = activityLinkFor(item);
+    entity.textContent = presentation.entity;
+    const metadata = document.createElement('p');
+    metadata.className = 'activity-feed-metadata';
+    metadata.textContent = actorName ? `by ${actorName}` : 'System activity';
+    copy.append(title, entity, metadata);
+    const timestamp = document.createElement('time');
+    timestamp.className = 'activity-feed-time';
+    timestamp.textContent = time.relative;
+    if (time.absolute) timestamp.title = time.absolute;
+    if (time.dateTime) timestamp.dateTime = time.dateTime;
+    row.append(icon, copy, timestamp);
     timeline.appendChild(row);
   });
 }
@@ -842,7 +815,49 @@ function renderActivityTimeline(items) {
 function renderActivityTimelineError() {
   const timeline = document.getElementById('recent-activity-timeline');
   timeline.setAttribute('aria-busy', 'false');
-  timeline.innerHTML = '<div class="timeline-empty-state">Recent workspace activity could not be loaded. Refresh the dashboard to try again.</div>';
+  const error = document.createElement('div');
+  error.className = 'timeline-empty-state';
+  error.textContent = 'Recent workspace activity could not be loaded. Refresh the dashboard to try again.';
+  timeline.replaceChildren(error);
+}
+
+function createActivityFeedIcon(iconName) {
+  const paths = {
+    response: 'M5 6.5h14v9H9l-4 3v-12Z M8 10.5h8',
+    'survey-add': 'M6 3.5h8l4 4v13H6v-17Z M14 3.5v4h4 M12 11v6 M9 14h6',
+    duplicate: 'M8 5h11v13H8z M5 8H4v11h11v-1',
+    edit: 'm5 16 1-4 9-9 3 3-9 9-4 1Z M13.5 4.5l3 3',
+    publish: 'M4 12h11 M11 7l5 5-5 5 M5 5v14',
+    lock: 'M7 10V7a5 5 0 0 1 10 0v3 M5 10h14v10H5z',
+    archive: 'M4 5h16v4H4z M6 9h12v11H6z M10 13h4',
+    restore: 'M8 7H4V3 M4 7a8 8 0 1 1-1 6',
+    pin: 'm9 4 6 6 M8 5l7 7 M12 12l-4 4v2h8v-2l-4-4 M12 18v3',
+    folder: 'M3 7h7l2 2h9v10H3z',
+    target: 'M12 4a8 8 0 1 0 8 8 M12 8a4 4 0 1 0 4 4 M12 12l7-7',
+    template: 'M6 3h9l3 3v15H6z M9 10h6 M9 14h6 M9 18h4',
+    team: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6 M2 20c0-3 2.5-5 6-5s6 2 6 5 M17 6a2.5 2.5 0 1 1 0 5 M16 15c2.5 0 4.5 1.5 5 4',
+    shield: 'M12 3 19 6v5c0 4.5-3 7.5-7 10-4-2.5-7-5.5-7-10V6z M9 12l2 2 4-4',
+    note: 'M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5',
+    download: 'M12 3v11 M8 10l4 4 4-4 M5 20h14',
+    activity: 'M4 13h3l2-6 4 11 2-5h5'
+  };
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', paths[iconName] || paths.activity);
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.8');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(path);
+  const chip = document.createElement('div');
+  chip.className = 'activity-feed-icon';
+  chip.setAttribute('aria-hidden', 'true');
+  chip.appendChild(svg);
+  return chip;
 }
 
 function syncActivityRangeControls() {

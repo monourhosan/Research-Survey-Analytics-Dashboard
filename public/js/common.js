@@ -77,13 +77,17 @@ function showConfirmDialog(title, message, onConfirm, confirmText = 'Confirm', i
 }
 
 // Verify Admin Session on Protected Pages
-async function initAdminAuth() {
+async function initAdminAuth(options = {}) {
   try {
     const res = await fetch('/api/auth/me');
     const data = await res.json();
 
     if (!data.authenticated) {
       window.location.href = '/login.html';
+      return null;
+    }
+    if (data.user.mustChangePassword && !options.allowPasswordChange) {
+      window.location.href = '/account.html';
       return null;
     }
 
@@ -99,6 +103,24 @@ async function initAdminAuth() {
     document.querySelectorAll('[data-admin-only]').forEach(element => {
       element.hidden = data.user.role !== 'admin';
     });
+    const profile = document.querySelector('.user-profile');
+    if (profile && !document.getElementById('nav-user-role')) {
+      const role = document.createElement('div');
+      role.id = 'nav-user-role';
+      role.className = 'user-role';
+      profile.querySelector('.user-meta')?.appendChild(role);
+    }
+    const roleEl = document.getElementById('nav-user-role');
+    if (roleEl) roleEl.textContent = data.user.role === 'admin' ? 'Administrator' : 'Team Member';
+    const footer = document.querySelector('.sidebar-footer');
+    if (footer && !document.getElementById('nav-account-link')) {
+      const accountLink = document.createElement('a');
+      accountLink.id = 'nav-account-link';
+      accountLink.className = 'nav-account-link';
+      accountLink.href = 'account.html';
+      accountLink.textContent = 'Account & Security';
+      footer.insertBefore(accountLink, footer.querySelector('#btn-global-logout'));
+    }
 
     return data.user;
   } catch (err) {
@@ -107,6 +129,25 @@ async function initAdminAuth() {
     return null;
   }
 }
+
+// A disabled account or a mandatory password reset can occur while a page is
+// open. Redirect on the next protected API response rather than waiting for
+// the natural session expiry.
+(() => {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const response = await nativeFetch(...args);
+    if (response.status === 401) {
+      window.location.assign('/login.html');
+    } else if (response.status === 403) {
+      try {
+        const body = await response.clone().json();
+        if (body.code === 'PASSWORD_CHANGE_REQUIRED') window.location.assign('/account.html');
+      } catch (_) {}
+    }
+    return response;
+  };
+})();
 
 // Global Logout Handler
 async function handleLogout() {

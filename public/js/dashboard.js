@@ -643,7 +643,7 @@ function activityActionPresentation(item) {
   const surveyTitle = item.surveyTitle || item.survey_title;
   const details = item.details && typeof item.details === 'object' ? item.details : {};
   const isPrivateNote = action.startsWith('NOTE_');
-  const fallbackName = !isPrivateNote && typeof details.name === 'string' ? details.name : '';
+  const fallbackName = !isPrivateNote && typeof details.name === 'string' ? details.name : (typeof details.email === 'string' ? details.email : '');
   const name = surveyTitle || fallbackName || (isPrivateNote ? 'Research workspace' : 'Workspace item');
   const actions = {
     SURVEY_CREATED: { icon: '+', text: details.source === 'template' ? 'was created from a template' : 'was created' },
@@ -663,6 +663,12 @@ function activityActionPresentation(item) {
     COLLECTION_CREATED: { icon: '+', text: 'collection was created' },
     COLLECTION_UPDATED: { icon: '✎', text: 'collection was updated' },
     COLLECTION_DELETED: { icon: '−', text: 'collection was deleted' },
+    TEAM_MEMBER_CREATED: { icon: '+', text: 'was added to the team' },
+    TEAM_MEMBER_UPDATED: { icon: '✎', text: 'team profile was updated' },
+    TEAM_MEMBER_DISABLED: { icon: '−', text: 'workspace access was removed' },
+    TEAM_MEMBER_ENABLED: { icon: '↺', text: 'workspace access was restored' },
+    TEAM_MEMBER_PASSWORD_RESET: { icon: '•', text: 'password was reset' },
+    PASSWORD_CHANGED: { icon: '•', text: 'account password was changed' },
     NOTE_CREATED: { icon: '•', text: 'received a private research-note update' },
     NOTE_UPDATED: { icon: '•', text: 'received a private research-note update' },
     NOTE_DELETED: { icon: '•', text: 'had a private research note removed' }
@@ -706,12 +712,13 @@ function renderActivityTimeline(items) {
   items.forEach(item => {
     const presentation = activityActionPresentation(item);
     const time = activityTimeDetails(item.createdAt || item.created_at);
+    const actorName = item.actor?.name || 'System';
     const row = document.createElement('article');
     row.className = 'timeline-item';
     row.innerHTML = `
       <div class="timeline-marker" aria-hidden="true">${escapeHtml(presentation.icon)}</div>
       <div class="timeline-copy">
-        <p><a href="${activityLinkFor(item)}">${escapeHtml(presentation.name)}</a> ${escapeHtml(presentation.text)}.</p>
+        <p><span class="timeline-actor">${escapeHtml(actorName)}</span> <a href="${activityLinkFor(item)}">${escapeHtml(presentation.name)}</a> ${escapeHtml(presentation.text)}.</p>
         <time${time.absolute ? ` title="${escapeHtml(time.absolute)}" datetime="${escapeHtml(item.createdAt || item.created_at || '')}"` : ''}>${escapeHtml(time.relative)}</time>
       </div>
     `;

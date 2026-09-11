@@ -317,12 +317,21 @@ async function initDatabase() {
         CREATE TABLE IF NOT EXISTS activity_logs (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           survey_id INTEGER,
+          actor_user_id INTEGER,
           action TEXT NOT NULL,
           details_json TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE SET NULL
+          FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE SET NULL,
+          FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
         );
       `);
+
+      // Historical activity is retained without an actor. New activity rows use
+      // a trusted nullable user reference that survives account deactivation.
+      const activityColumns = await dbAll('PRAGMA table_info(activity_logs)');
+      if (!activityColumns.some(column => column.name === 'actor_user_id')) {
+        db.run('ALTER TABLE activity_logs ADD COLUMN actor_user_id INTEGER');
+      }
 
       db.run(`
         CREATE TABLE IF NOT EXISTS saved_views (
@@ -341,6 +350,7 @@ async function initDatabase() {
       db.run('CREATE INDEX IF NOT EXISTS idx_surveys_workspace ON surveys(is_archived, is_pinned, status)');
       db.run('CREATE INDEX IF NOT EXISTS idx_notes_survey ON survey_notes(survey_id, created_at DESC)');
       db.run('CREATE INDEX IF NOT EXISTS idx_activity_survey ON activity_logs(survey_id, created_at DESC)');
+      db.run('CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_logs(actor_user_id, created_at DESC)');
       db.run('CREATE INDEX IF NOT EXISTS idx_saved_views_type ON saved_views(view_type, survey_id)');
       db.run('CREATE INDEX IF NOT EXISTS idx_users_active_role ON users(is_active, role)');
 

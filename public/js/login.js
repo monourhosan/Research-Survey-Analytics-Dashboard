@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const response = await fetch('/api/auth/me');
     const data = await response.json();
-    if (data.authenticated) window.location.href = '/dashboard.html';
+    if (data.authenticated) window.location.href = data.user?.mustChangePassword ? '/account.html' : '/dashboard.html';
   } catch (_) {}
 
   function showSelection() {
@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, accessMode: selectedMode }) });
       const data = await response.json();
-      if (response.ok && data.success) window.location.href = '/dashboard.html';
+      if (response.ok && data.success) window.location.href = data.mustChangePassword ? '/account.html' : '/dashboard.html';
       else inlineError.textContent = data.error || 'Unable to sign in. Please try again.';
     } catch (_) { inlineError.textContent = 'Network error. Check your connection and try again.'; }
     finally { submitBtn.disabled = false; submitBtn.innerHTML = 'Sign In <span aria-hidden="true">→</span>'; }

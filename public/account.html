@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Account & Security - Research Survey Analytics Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="admin-page">
+  <div class="app-container">
+    <aside class="sidebar">
+      <div class="sidebar-header"><div class="brand-icon">R</div><div><div class="brand-title">Research Survey</div><div class="brand-subtitle">Analytics Dashboard</div></div></div>
+      <nav class="sidebar-nav" aria-label="Main navigation">
+        <a href="dashboard.html" class="nav-link"><span aria-hidden="true">📊</span> Overview Dashboard</a>
+        <a href="surveys.html" class="nav-link"><span aria-hidden="true">📋</span> All Surveys</a>
+        <a href="create-survey.html" class="nav-link"><span aria-hidden="true">➕</span> Create Survey</a>
+        <a href="settings.html" class="nav-link" data-admin-only><span aria-hidden="true">⚙</span> Settings</a>
+      </nav>
+      <div class="sidebar-footer"><div class="user-profile"><div class="user-avatar" id="nav-user-avatar">A</div><div class="user-meta"><div class="user-name" id="nav-user-name">Research User</div><div class="user-email" id="nav-user-email"></div></div></div><button type="button" class="btn-logout" id="btn-global-logout"><span aria-hidden="true">🚪</span> Sign Out</button></div>
+    </aside>
+    <div class="main-wrapper">
+      <header class="top-header"><div style="display:flex;align-items:center;gap:16px"><button type="button" class="mobile-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">☰</button><div class="header-title-section"><span class="page-kicker">Personal account</span><h1>Account & Security</h1><p>Keep your workspace sign-in secure.</p></div></div></header>
+      <main class="content-area account-content">
+        <section class="account-intro" id="forced-password-notice" hidden><strong>Update your temporary password to continue.</strong><p>For your security, workspace features remain unavailable until you set a new password.</p></section>
+        <section class="card account-card" aria-labelledby="change-password-title">
+          <div class="card-header"><div><span class="page-kicker">Security</span><h2 class="card-title" id="change-password-title">Change password</h2><p class="card-subtitle">Use 10–128 characters. Your current password is required.</p></div></div>
+          <form class="account-password-form" id="change-password-form" novalidate>
+            <label class="form-label" for="current-password">Current password</label><input class="form-input" id="current-password" type="password" autocomplete="current-password" required>
+            <label class="form-label" for="new-password">New password</label><input class="form-input" id="new-password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+            <label class="form-label" for="confirm-password">Confirm new password</label><input class="form-input" id="confirm-password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+            <p class="form-error" id="change-password-error" role="alert"></p>
+            <div class="account-form-actions"><button class="btn btn-primary" type="submit" id="btn-change-password">Update Password</button><a class="btn btn-secondary" href="dashboard.html" id="account-workspace-link">Back to workspace</a></div>
+          </form>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="js/common.js"></script>
+  <script src="js/account.js"></script>
+</body>
+</html>

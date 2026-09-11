@@ -80,7 +80,8 @@ function safeUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
-    role: user.role
+    role: user.role,
+    mustChangePassword: Number(user.must_change_password) === 1
   };
 }
 
@@ -138,7 +139,7 @@ function isUniqueConstraintError(error) {
 async function getActiveSessionUser(req) {
   if (!req.session || !Number.isSafeInteger(req.session.userId)) return null;
   const user = await dbGet(
-    'SELECT id, name, email, role, is_active FROM users WHERE id = ?',
+    'SELECT id, name, email, role, is_active, must_change_password FROM users WHERE id = ?',
     [req.session.userId]
   );
   if (!user || Number(user.is_active) !== 1 || !isValidUserRole(user.role)) return null;
@@ -182,6 +183,16 @@ async function requireAdmin(req, res, next) {
   } catch (err) {
     return res.status(500).json({ error: 'Unable to verify the current session.' });
   }
+}
+
+/** Blocks normal workspace access until a temporary password is replaced. */
+async function requireWorkspaceAccess(req, res, next) {
+  return requireAuth(req, res, () => {
+    if (Number(req.currentUser.must_change_password) === 1) {
+      return res.status(403).json({ error: 'Password change required before accessing the workspace.', code: 'PASSWORD_CHANGE_REQUIRED' });
+    }
+    return next();
+  });
 }
 
 const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -265,11 +276,11 @@ function safeJson(value, fallback = null) {
   try { return JSON.parse(value); } catch (_) { return fallback; }
 }
 
-async function recordActivity(action, surveyId = null, details = null) {
+async function recordActivity(req, action, surveyId = null, details = null) {
   const detailsJson = details ? JSON.stringify(details) : null;
   await dbRun(
-    'INSERT INTO activity_logs (survey_id, action, details_json) VALUES (?, ?, ?)',
-    [surveyId, action, detailsJson]
+    'INSERT INTO activity_logs (survey_id, actor_user_id, action, details_json) VALUES (?, ?, ?, ?)',
+    [surveyId, req && req.currentUser ? req.currentUser.id : null, action, detailsJson]
   );
 }
 
@@ -831,7 +842,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const user = await dbGet(
-      'SELECT id, name, email, password_hash, role, is_active FROM users WHERE email = ?',
+      'SELECT id, name, email, password_hash, role, is_active, must_change_password FROM users WHERE email = ?',
       [email.trim().toLowerCase()]
     );
     const isValid = user && verifyPassword(password, user.password_hash);
@@ -852,7 +863,8 @@ app.post('/api/auth/login', async (req, res) => {
 
     return res.json({
       success: true,
-      user: safeUser(user)
+      user: safeUser(user),
+      mustChangePassword: Number(user.must_change_password) === 1
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -891,6 +903,26 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body || {};
+    const normalizedPassword = normalizeTeamMemberPassword(newPassword);
+    if (normalizedPassword.error) return res.status(400).json({ error: normalizedPassword.error });
+    if (newPassword !== confirmPassword) return res.status(400).json({ error: 'New password and confirmation must match.' });
+    const account = await dbGet('SELECT id, password_hash, role FROM users WHERE id = ? AND is_active = 1', [req.currentUser.id]);
+    if (!account || !verifyPassword(currentPassword || '', account.password_hash)) return res.status(401).json({ error: 'Current password is incorrect.' });
+    if (verifyPassword(newPassword, account.password_hash)) return res.status(400).json({ error: 'Choose a different password from your current password.' });
+    await dbRun('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [hashPassword(newPassword), account.id]);
+    await new Promise((resolve, reject) => req.session.regenerate(error => error ? reject(error) : resolve()));
+    req.session.userId = account.id;
+    req.session.userRole = account.role;
+    await recordActivity(req, 'PASSWORD_CHANGED', null, { forcedChange: Number(req.currentUser.must_change_password) === 1 });
+    return res.json({ success: true, user: safeUser({ ...req.currentUser, must_change_password: 0 }) });
+  } catch (_) {
+    return res.status(500).json({ error: 'Unable to change password.' });
+  }
+});
+
 // Current workspace APIs were historically administrator-only. Keep that
 // authorization on the server so a team member cannot gain capabilities by
 // altering the UI or request payload. Public respondent routes stay outside.
@@ -901,8 +933,9 @@ app.use([
   '/api/collections',
   '/api/templates',
   '/api/activity',
-  '/api/saved-views'
-], requireAdmin);
+  '/api/saved-views',
+  '/api/notes'
+], requireWorkspaceAccess);
 
 /* ===========================================================================
    1B. ADMINISTRATOR TEAM MANAGEMENT API
@@ -933,7 +966,7 @@ app.post('/api/team-members', requireAdmin, async (req, res) => {
     const normalizedPassword = normalizeTeamMemberPassword(temporaryPassword);
     if (normalizedPassword.error) return res.status(400).json({ error: normalizedPassword.error });
     const member = await createUserAccount({ name: normalizedName.value, email: normalizedEmail.value, password: normalizedPassword.value, role: USER_ROLES.TEAM_MEMBER, createdByUserId: req.currentUser.id, mustChangePassword: true });
-    await recordActivity('team_member_created', null, { teamMemberId: member.id, email: member.email });
+    await recordActivity(req, 'team_member_created', null, { teamMemberId: member.id, email: member.email });
     return res.status(201).json({ member: safeTeamMember(member), ...(generatedPassword ? { temporaryPassword } : {}) });
   } catch (error) {
     if (isUniqueConstraintError(error)) return res.status(409).json({ error: 'A member with that email already exists.' });
@@ -952,7 +985,7 @@ app.put('/api/team-members/:id', requireAdmin, async (req, res) => {
     if (normalizedName.error || normalizedEmail.error) return res.status(400).json({ error: normalizedName.error || normalizedEmail.error });
     await dbRun('UPDATE users SET name = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND role = ?', [normalizedName.value, normalizedEmail.value, memberId, USER_ROLES.TEAM_MEMBER]);
     const member = await findTeamMember(memberId);
-    await recordActivity('team_member_updated', null, { teamMemberId: memberId, email: member.email });
+    await recordActivity(req, 'team_member_updated', null, { teamMemberId: memberId, email: member.email });
     return res.json({ member: safeTeamMember(member) });
   } catch (error) {
     if (isUniqueConstraintError(error)) return res.status(409).json({ error: 'A member with that email already exists.' });
@@ -967,7 +1000,7 @@ async function setTeamMemberActive(req, res, isActive) {
     if (!await findTeamMember(memberId)) return res.status(404).json({ error: 'Team member not found.' });
     await dbRun('UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND role = ?', [isActive ? 1 : 0, memberId, USER_ROLES.TEAM_MEMBER]);
     const member = await findTeamMember(memberId);
-    await recordActivity(isActive ? 'team_member_enabled' : 'team_member_disabled', null, { teamMemberId: memberId, email: member.email });
+    await recordActivity(req, isActive ? 'team_member_enabled' : 'team_member_disabled', null, { teamMemberId: memberId, email: member.email });
     return res.json({ member: safeTeamMember(member) });
   } catch (_) {
     return res.status(500).json({ error: `Unable to ${isActive ? 'reactivate' : 'disable'} team member.` });
@@ -989,7 +1022,7 @@ app.post('/api/team-members/:id/reset-password', requireAdmin, async (req, res) 
     const normalizedPassword = normalizeTeamMemberPassword(temporaryPassword);
     if (normalizedPassword.error) return res.status(400).json({ error: normalizedPassword.error });
     await dbRun(`UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND role = ?`, [hashPassword(normalizedPassword.value), memberId, USER_ROLES.TEAM_MEMBER]);
-    await recordActivity('team_member_password_reset', null, { teamMemberId: memberId, email: existing.email });
+    await recordActivity(req, 'team_member_password_reset', null, { teamMemberId: memberId, email: existing.email });
     return res.json({ member: safeTeamMember(await findTeamMember(memberId)), ...(generatedPassword ? { temporaryPassword } : {}) });
   } catch (_) {
     return res.status(500).json({ error: 'Unable to reset team member password.' });
@@ -1212,7 +1245,7 @@ app.post('/api/collections', requireAuth, async (req, res) => {
     if (description.length > MAX_COLLECTION_DESCRIPTION_LENGTH) return res.status(400).json({ error: `Collection description must not exceed ${MAX_COLLECTION_DESCRIPTION_LENGTH} characters.` });
     const result = await dbRun('INSERT INTO collections (name, description) VALUES (?, ?)', [name.value, description]);
     const collection = await dbGet('SELECT * FROM collections WHERE id = ?', [result.lastID]);
-    await recordActivity('COLLECTION_CREATED', null, { collection_id: collection.id, name: collection.name });
+    await recordActivity(req, 'COLLECTION_CREATED', null, { collection_id: collection.id, name: collection.name });
     return res.status(201).json(collection);
   } catch (err) {
     return res.status(400).json({ error: 'Collection name already exists or could not be created.' });
@@ -1231,7 +1264,7 @@ app.put('/api/collections/:id', requireAuth, async (req, res) => {
     if (description.length > MAX_COLLECTION_DESCRIPTION_LENGTH) return res.status(400).json({ error: `Collection description must not exceed ${MAX_COLLECTION_DESCRIPTION_LENGTH} characters.` });
     await dbRun('UPDATE collections SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name.value, description, id]);
     const collection = await dbGet('SELECT * FROM collections WHERE id = ?', [id]);
-    await recordActivity('COLLECTION_UPDATED', null, { collection_id: id, name: collection.name });
+    await recordActivity(req, 'COLLECTION_UPDATED', null, { collection_id: id, name: collection.name });
     return res.json(collection);
   } catch (_) { return res.status(400).json({ error: 'Collection could not be updated. Names must be unique.' }); }
 });
@@ -1243,7 +1276,7 @@ app.delete('/api/collections/:id', requireAuth, async (req, res) => {
     if (!collection) return res.status(404).json({ error: 'Collection not found.' });
     await dbRun('UPDATE surveys SET collection_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE collection_id = ?', [id]);
     await dbRun('DELETE FROM collections WHERE id = ?', [id]);
-    await recordActivity('COLLECTION_DELETED', null, { collection_id: id, name: collection.name });
+    await recordActivity(req, 'COLLECTION_DELETED', null, { collection_id: id, name: collection.name });
     return res.json({ success: true, message: 'Collection deleted; its surveys are now unassigned.' });
   } catch (_) { return res.status(500).json({ error: 'Failed to delete collection.' }); }
 });
@@ -1273,7 +1306,7 @@ app.post('/api/surveys/:id/duplicate', requireAuth, async (req, res) => {
         VALUES (?, ?, 'draft', ?, ?, ?, ?, 0, 0, ?)`, [copyTitle, source.description || '', deadline, source.response_limit || null, source.one_response_per_browser || 0, source.collection_id || null, source.target_responses || null]);
       for (const question of questions) await dbRun(`INSERT INTO questions (survey_id, question_text, question_type, options_json, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?)`, [created.lastID, question.question_text, question.question_type, question.options_json, question.is_required, question.sort_order]);
       await dbRun('COMMIT');
-      await recordActivity('SURVEY_DUPLICATED', created.lastID, { source_survey_id: sourceId });
+      await recordActivity(req, 'SURVEY_DUPLICATED', created.lastID, { source_survey_id: sourceId });
       return res.status(201).json({ id: created.lastID, title: copyTitle, status: 'draft' });
     } catch (err) { await dbRun('ROLLBACK'); throw err; }
   } catch (err) { return res.status(500).json({ error: 'Failed to duplicate survey.' }); }
@@ -1310,7 +1343,7 @@ app.post('/api/surveys/:id/templates', requireAuth, async (req, res) => {
     const questions = await dbAll('SELECT * FROM questions WHERE survey_id = ? ORDER BY sort_order, id', [id]);
     const result = await dbRun('INSERT INTO survey_templates (name, description, template_json) VALUES (?, ?, ?)', [name.value, typeof req.body.description === 'string' ? req.body.description.trim() : '', JSON.stringify(templatePayloadFromSurvey(survey, questions))]);
     const template = await dbGet('SELECT id, name, description, created_at, updated_at FROM survey_templates WHERE id = ?', [result.lastID]);
-    await recordActivity('TEMPLATE_CREATED', id, { template_id: template.id, name: template.name });
+    await recordActivity(req, 'TEMPLATE_CREATED', id, { template_id: template.id, name: template.name });
     return res.status(201).json(template);
   } catch (_) { return res.status(500).json({ error: 'Failed to save survey as a template.' }); }
 });
@@ -1335,7 +1368,7 @@ app.post('/api/templates/:id/create-survey', requireAuth, async (req, res) => {
         await dbRun('INSERT INTO questions (survey_id, question_text, question_type, options_json, is_required, sort_order) VALUES (?, ?, ?, ?, ?, ?)', [created.lastID, String(q.question_text).trim(), q.question_type, options, q.is_required ? 1 : 0, Number.isSafeInteger(q.sort_order) ? q.sort_order : index]);
       }
       await dbRun('COMMIT');
-      await recordActivity('SURVEY_CREATED', created.lastID, { template_id: id, source: 'template' });
+      await recordActivity(req, 'SURVEY_CREATED', created.lastID, { template_id: id, source: 'template' });
       return res.status(201).json({ id: created.lastID, title: title.value, status: 'draft' });
     } catch (err) { await dbRun('ROLLBACK'); throw err; }
   } catch (_) { return res.status(500).json({ error: 'Failed to create survey from template.' }); }
@@ -1351,7 +1384,7 @@ app.put('/api/templates/:id', requireAuth, async (req, res) => {
     const description = typeof req.body.description === 'string' ? req.body.description.trim().slice(0, 1000) : template.description;
     await dbRun('UPDATE survey_templates SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name.value, description, id]);
     const updated = await dbGet('SELECT id, name, description, created_at, updated_at FROM survey_templates WHERE id = ?', [id]);
-    await recordActivity('TEMPLATE_UPDATED', null, { template_id: id, name: updated.name });
+    await recordActivity(req, 'TEMPLATE_UPDATED', null, { template_id: id, name: updated.name });
     return res.json(updated);
   } catch (_) { return res.status(500).json({ error: 'Failed to update template.' }); }
 });
@@ -1362,7 +1395,7 @@ app.delete('/api/templates/:id', requireAuth, async (req, res) => {
     const template = id && await dbGet('SELECT id, name FROM survey_templates WHERE id = ?', [id]);
     if (!template) return res.status(404).json({ error: 'Template not found.' });
     await dbRun('DELETE FROM survey_templates WHERE id = ?', [id]);
-    await recordActivity('TEMPLATE_DELETED', null, { template_id: id, name: template.name });
+    await recordActivity(req, 'TEMPLATE_DELETED', null, { template_id: id, name: template.name });
     return res.json({ success: true });
   } catch (_) { return res.status(500).json({ error: 'Failed to delete template.' }); }
 });
@@ -1374,7 +1407,7 @@ app.post('/api/surveys/:id/archive', requireAuth, async (req, res) => {
     if (!survey) return res.status(404).json({ error: 'Survey not found.' });
     if (survey.status === 'active') return res.status(400).json({ error: 'Close an active survey before archiving it.' });
     await dbRun('UPDATE surveys SET is_archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
-    await recordActivity('SURVEY_ARCHIVED', id);
+    await recordActivity(req, 'SURVEY_ARCHIVED', id);
     return res.json({ success: true, is_archived: 1 });
   } catch (_) { return res.status(500).json({ error: 'Failed to archive survey.' }); }
 });
@@ -1385,7 +1418,7 @@ app.post('/api/surveys/:id/restore', requireAuth, async (req, res) => {
     const survey = id && await dbGet('SELECT id FROM surveys WHERE id = ?', [id]);
     if (!survey) return res.status(404).json({ error: 'Survey not found.' });
     await dbRun('UPDATE surveys SET is_archived = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
-    await recordActivity('SURVEY_RESTORED', id);
+    await recordActivity(req, 'SURVEY_RESTORED', id);
     return res.json({ success: true, is_archived: 0 });
   } catch (_) { return res.status(500).json({ error: 'Failed to restore survey.' }); }
 });
@@ -1396,7 +1429,7 @@ app.post('/api/surveys/:id/pin', requireAuth, async (req, res) => {
     if (!survey) return res.status(404).json({ error: 'Survey not found.' });
     const pinned = req.body && req.body.pinned === false ? 0 : 1;
     await dbRun('UPDATE surveys SET is_pinned = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pinned, id]);
-    await recordActivity(pinned ? 'SURVEY_PINNED' : 'SURVEY_UNPINNED', id);
+    await recordActivity(req, pinned ? 'SURVEY_PINNED' : 'SURVEY_UNPINNED', id);
     return res.json({ success: true, is_pinned: pinned });
   } catch (_) { return res.status(500).json({ error: 'Failed to update survey pin.' }); }
 });
@@ -1419,7 +1452,7 @@ app.post('/api/surveys/:id/notes', requireAuth, async (req, res) => {
     if (note.error) return res.status(400).json({ error: note.error });
     const result = await dbRun('INSERT INTO survey_notes (survey_id, note_text) VALUES (?, ?)', [surveyId, note.value]);
     const created = await dbGet('SELECT * FROM survey_notes WHERE id = ?', [result.lastID]);
-    await recordActivity('NOTE_CREATED', surveyId, { note_id: created.id });
+    await recordActivity(req, 'NOTE_CREATED', surveyId, { note_id: created.id });
     return res.status(201).json(created);
   } catch (_) { return res.status(500).json({ error: 'Failed to create research note.' }); }
 });
@@ -1432,7 +1465,7 @@ app.put('/api/notes/:id', requireAuth, async (req, res) => {
     if (text.error) return res.status(400).json({ error: text.error });
     await dbRun('UPDATE survey_notes SET note_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [text.value, id]);
     const updated = await dbGet('SELECT * FROM survey_notes WHERE id = ?', [id]);
-    await recordActivity('NOTE_UPDATED', note.survey_id, { note_id: id });
+    await recordActivity(req, 'NOTE_UPDATED', note.survey_id, { note_id: id });
     return res.json(updated);
   } catch (_) { return res.status(500).json({ error: 'Failed to update research note.' }); }
 });
@@ -1442,7 +1475,7 @@ app.delete('/api/notes/:id', requireAuth, async (req, res) => {
     const id = parsePositiveId(req.params.id); const note = id && await dbGet('SELECT * FROM survey_notes WHERE id = ?', [id]);
     if (!note) return res.status(404).json({ error: 'Research note not found.' });
     await dbRun('DELETE FROM survey_notes WHERE id = ?', [id]);
-    await recordActivity('NOTE_DELETED', note.survey_id, { note_id: id });
+    await recordActivity(req, 'NOTE_DELETED', note.survey_id, { note_id: id });
     return res.json({ success: true });
   } catch (_) { return res.status(500).json({ error: 'Failed to delete research note.' }); }
 });
@@ -1452,7 +1485,10 @@ app.get('/api/activity', requireAuth, async (req, res) => {
     const limitValue = typeof req.query.limit === 'string' ? req.query.limit.trim() : '';
     const requested = /^[1-9]\d*$/.test(limitValue) ? Number(limitValue) : 20;
     const limit = Number.isSafeInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 20;
-    const rows = await dbAll(`SELECT a.*, s.title AS survey_title FROM activity_logs a LEFT JOIN surveys s ON s.id = a.survey_id
+    const rows = await dbAll(`SELECT a.*, s.title AS survey_title, u.name AS actor_name, u.email AS actor_email, u.role AS actor_role
+      FROM activity_logs a
+      LEFT JOIN surveys s ON s.id = a.survey_id
+      LEFT JOIN users u ON u.id = a.actor_user_id
       ORDER BY a.created_at DESC, a.id DESC LIMIT ?`, [limit]);
     return res.json(rows.map(row => {
       const details = safeJson(row.details_json, null);
@@ -1463,7 +1499,8 @@ app.get('/api/activity', requireAuth, async (req, res) => {
         // the existing activity-history fields for current callers.
         surveyId: row.survey_id || null,
         surveyTitle: row.survey_title || null,
-        createdAt: row.created_at
+        createdAt: row.created_at,
+        actor: row.actor_user_id ? { id: row.actor_user_id, name: row.actor_name || 'Former workspace member', role: row.actor_role || null } : null
       };
     }));
   } catch (_) { return res.status(500).json({ error: 'Failed to load activity history.' }); }
@@ -1655,7 +1692,7 @@ app.post('/api/surveys', requireAuth, async (req, res) => {
 
     const createdSurvey = await dbGet('SELECT * FROM surveys WHERE id = ?', [surveyId]);
     const createdQuestions = await dbAll('SELECT * FROM questions WHERE survey_id = ? ORDER BY sort_order ASC, id ASC', [surveyId]);
-    await recordActivity('SURVEY_CREATED', surveyId, { collection_id: normalizedCollection.value, status: surveyStatus });
+    await recordActivity(req, 'SURVEY_CREATED', surveyId, { collection_id: normalizedCollection.value, status: surveyStatus });
 
     return res.status(201).json({
       ...createdSurvey,
@@ -1765,7 +1802,7 @@ app.put('/api/surveys/:id', requireAuth, async (req, res) => {
       'UPDATE surveys SET title = ?, description = ?, response_deadline = ?, response_limit = ?, one_response_per_browser = ?, target_responses = ?, collection_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [title.trim(), description ? description.trim() : '', normalizedDeadline.value, normalizedLimit.value, normalizedBrowserProtection.value, normalizedTarget.value, normalizedCollection.value, surveyId]
     );
-    await recordActivity('SURVEY_UPDATED', surveyId, {
+    await recordActivity(req, 'SURVEY_UPDATED', surveyId, {
       old_deadline: existing.response_deadline || null,
       new_deadline: normalizedDeadline.value || null,
       old_target: existing.target_responses || null,
@@ -1774,10 +1811,10 @@ app.put('/api/surveys/:id', requireAuth, async (req, res) => {
       new_collection_id: normalizedCollection.value || null
     });
     if (targetWasProvided && Number(existing.target_responses || 0) !== Number(normalizedTarget.value || 0)) {
-      await recordActivity('TARGET_UPDATED', surveyId, { old_target: existing.target_responses || null, new_target: normalizedTarget.value || null });
+      await recordActivity(req, 'TARGET_UPDATED', surveyId, { old_target: existing.target_responses || null, new_target: normalizedTarget.value || null });
     }
     if (collectionWasProvided && Number(existing.collection_id || 0) !== Number(normalizedCollection.value || 0)) {
-      await recordActivity('SURVEY_MOVED_COLLECTION', surveyId, { old_collection_id: existing.collection_id || null, new_collection_id: normalizedCollection.value || null });
+      await recordActivity(req, 'SURVEY_MOVED_COLLECTION', surveyId, { old_collection_id: existing.collection_id || null, new_collection_id: normalizedCollection.value || null });
     }
 
     // If questions array passed, sync questions
@@ -1885,7 +1922,7 @@ app.post('/api/surveys/:id/publish', requireAuth, async (req, res) => {
       "UPDATE surveys SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [surveyId]
     );
-    await recordActivity('SURVEY_PUBLISHED', surveyId);
+    await recordActivity(req, 'SURVEY_PUBLISHED', surveyId);
 
     return res.json({ success: true, message: 'Survey published successfully', status: 'active' });
   } catch (err) {
@@ -1911,7 +1948,7 @@ app.post('/api/surveys/:id/close', requireAuth, async (req, res) => {
       "UPDATE surveys SET status = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [surveyId]
     );
-    await recordActivity('SURVEY_CLOSED', surveyId);
+    await recordActivity(req, 'SURVEY_CLOSED', surveyId);
 
     return res.json({ success: true, message: 'Survey closed successfully', status: 'closed' });
   } catch (err) {

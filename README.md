@@ -34,7 +34,7 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
 
 ## 4. Main Features
 
-1. **Role-Aware Authentication Foundation**: Secure session-based login with salted password hashing using Node.js built-in `crypto` (scrypt). Accounts are active/inactive and use the server-enforced `admin` or `team_member` role; the current administrator workspace remains administrator-only while Team Management UI is prepared for a later phase.
+1. **Collaborative Research Workspace**: Secure session-based login with salted `scrypt` password hashing supports exactly two server-enforced roles: **Administrator** and **Team Member**. Both roles can work with surveys, analytics, exports, collections, templates, comparisons, notes, archive/restore, and activity history. Only administrators can manage team accounts and security settings.
 2. **Survey Authoring & Management**:
    - Create surveys with custom titles and researcher descriptions.
    - 4 supported question types:
@@ -108,6 +108,23 @@ Furthermore, analyzing raw survey outputs manually using spreadsheets is time-co
    - **Response Calendar Heatmap** shows a server-derived, UTC-aligned 84-day response pattern with zero-filled dates.
    - **Command Palette** opens with Ctrl/Cmd+K to navigate existing research workflows and search current surveys from a one-time cached inventory request.
    - **Milestones & Achievement Badges** use deterministic target, readiness, deadline, and seven-day activity rules. A versioned browser-local storage entry acknowledges target celebrations without storing responses, answers, notes, or respondent data.
+17. **Team Access & Security (Phase 3)**:
+   - Administrators can add, edit, disable, reactivate, and reset Team Member accounts from Settings. Removing access is a soft deactivation, so research records and activity history are preserved.
+   - Newly generated and reset passwords enter a mandatory password-change state. Until the member replaces the temporary password, server-side workspace routes remain blocked.
+   - Every protected request reloads the account's active role from the database; a disabled member's next request is rejected even when the browser still has a session cookie.
+   - Every user can change their own password from **Account & Security** after current-password verification. Passwords, hashes, salts, temporary passwords, and session identifiers are never returned in account lists or activity data.
+   - Authenticated activity records retain a trusted actor reference. Actor identity comes from the server session, not client input; historical activity without an actor remains readable.
+
+### Route Permission Model
+
+| Route group | Permission |
+|---|---|
+| Public survey loading and response submission (`/api/public/*`) | Public |
+| Login, logout, current-session lookup, and password change (`/api/auth/*`) | Public where applicable; password change requires the active signed-in account |
+| Dashboard, surveys, analytics/CSV export, collections, templates, notes, comparisons, saved views, and activity | `requireAuth` plus active-account and temporary-password enforcement |
+| Team-member management (`/api/team-members/*`) | `requireAdmin` |
+
+The implemented collaboration scope is a two-role Admin/Team Member model. It does not claim granular per-survey permissions, multiple administrator owners, or broader role-based access control.
 
 ### Research Health Score Rules
 

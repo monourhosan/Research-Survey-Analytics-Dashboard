@@ -71,13 +71,22 @@
       </header>
 
       <main class="content-area dashboard-content">
-        <section class="dashboard-intro" aria-label="Dashboard introduction">
-          <div>
-            <span class="page-kicker">Workspace summary</span>
-            <h2>Your research, at a glance.</h2>
-            <p>Use this overview to keep survey collection moving and find the studies that need attention.</p>
+        <section class="research-command-center" id="research-command-center" aria-labelledby="command-center-greeting" data-workspace-state="loading">
+          <div class="research-command-center-copy">
+            <span class="page-kicker">Research command center</span>
+            <h2 id="command-center-greeting">Welcome back, Researcher</h2>
+            <p id="command-center-summary" aria-live="polite">Loading your research summary…</p>
+            <div class="research-command-center-actions" aria-label="Research command center actions">
+              <a href="create-survey.html" class="btn btn-primary">
+                <span aria-hidden="true">＋</span> Create Survey
+              </a>
+              <a href="surveys.html?quickAction=analytics" class="btn btn-secondary">View Analytics <span aria-hidden="true">→</span></a>
+            </div>
           </div>
-          <a href="surveys.html" class="dashboard-text-link">View survey library <span aria-hidden="true">→</span></a>
+          <p class="research-command-center-status" aria-live="polite">
+            <span class="research-command-center-status-dot" aria-hidden="true"></span>
+            <span id="command-center-status">Loading workspace…</span>
+          </p>
         </section>
 
         <!-- Metric Cards -->

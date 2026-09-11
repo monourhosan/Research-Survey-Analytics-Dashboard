@@ -1053,6 +1053,9 @@ async function runTests() {
     const dashboardScript = await request('GET', '/js/dashboard.js');
     assert(
       dashboardPage.status === 200 && dashboardPage.raw.includes('Attention Required') &&
+      dashboardPage.raw.includes('research-command-center') && dashboardPage.raw.includes('command-center-greeting') &&
+      dashboardPage.raw.includes('command-center-summary') && dashboardPage.raw.includes('command-center-status') &&
+      dashboardPage.raw.includes('surveys.html?quickAction=analytics') &&
       dashboardPage.raw.includes('command-palette-dialog') && dashboardPage.raw.includes('command-palette-input') &&
       dashboardPage.raw.includes('Milestones &amp; Achievements') && dashboardPage.raw.includes('milestone-achievements-list') &&
       dashboardPage.raw.includes('Response Calendar') && dashboardPage.raw.includes('response-heatmap-grid') &&

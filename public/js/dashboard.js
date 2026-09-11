@@ -26,6 +26,7 @@ const commandPaletteState = {
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await initAdminAuth();
   if (!user) return;
+  setCommandCenterIdentity(user);
 
   initializeCommandPalette();
   syncDashboardQuickActions();
@@ -50,6 +51,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadDashboardData();
   startResponsePulsePolling();
 });
+
+function commandCenterGreetingForHour(hour = new Date().getHours()) {
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function commandCenterCount(value) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue >= 0 ? Math.floor(numericValue) : 0;
+}
+
+function commandCenterLabel(value, singular, plural = `${singular}s`) {
+  const count = commandCenterCount(value);
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function setCommandCenterIdentity(user) {
+  const greeting = document.getElementById('command-center-greeting');
+  if (!greeting) return;
+  const displayName = typeof user?.name === 'string' && user.name.trim() ? user.name.trim() : 'Researcher';
+  greeting.textContent = `${commandCenterGreetingForHour()}, ${displayName} 👋`;
+}
+
+function renderCommandCenterSummary(data) {
+  const commandCenter = document.getElementById('research-command-center');
+  const summary = document.getElementById('command-center-summary');
+  const status = document.getElementById('command-center-status');
+  if (!commandCenter || !summary || !status) return;
+  const activeSurveys = commandCenterCount(data?.activeSurveys);
+  const totalResponses = commandCenterCount(data?.totalResponses);
+  summary.textContent = `${commandCenterLabel(activeSurveys, 'active survey')} · ${commandCenterLabel(totalResponses, 'total response')}`;
+  status.textContent = 'Workspace ready';
+  commandCenter.dataset.workspaceState = 'ready';
+}
+
+function renderCommandCenterError() {
+  const commandCenter = document.getElementById('research-command-center');
+  const summary = document.getElementById('command-center-summary');
+  const status = document.getElementById('command-center-status');
+  if (!commandCenter || !summary || !status) return;
+  summary.textContent = 'Your research summary could not be loaded.';
+  status.textContent = 'Workspace data unavailable';
+  commandCenter.dataset.workspaceState = 'error';
+}
 
 function workspaceActions() {
   return window.CommandPaletteUtils?.getWorkspaceActions?.() || [];
@@ -244,6 +290,7 @@ async function loadDashboardData() {
     document.getElementById('stat-active-surveys').textContent = data.activeSurveys || 0;
     document.getElementById('stat-closed-surveys').textContent = data.closedSurveys || 0;
     document.getElementById('stat-total-responses').textContent = data.totalResponses || 0;
+    renderCommandCenterSummary(data);
     renderAttentionItems(data.attentionItems || [], data.totalAttentionItems || 0);
     renderUpcomingResearch(data.upcomingResearch || []);
     renderResponseActivity(data.responseActivity);
@@ -339,6 +386,7 @@ async function loadDashboardData() {
     renderResponsePulseError();
     renderResearchHealthError();
     renderSurveyAchievementsError();
+    renderCommandCenterError();
     showToast('Failed to load dashboard metrics', 'error');
   }
 }
